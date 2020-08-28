@@ -1192,8 +1192,8 @@ static size_t command_condition_normalise(command_result_t *result, command_file
 
 	if (fr_debug_lvl > DEBUG_ENABLED3) {
 		if (cond->type == COND_TYPE_MAP) {
-			if (cond->data.map->lhs) tmpl_attr_debug(cond->data.map->lhs);
-			if (cond->data.map->rhs) tmpl_attr_debug(cond->data.map->rhs);
+			if (cond->data.map->lhs) tmpl_debug(cond->data.map->lhs);
+			if (cond->data.map->rhs) tmpl_debug(cond->data.map->rhs);
 		}
 	}
 
@@ -2150,7 +2150,7 @@ static size_t command_xlat_normalise(command_result_t *result, command_file_ctx_
 	char			buff[1024];
 	fr_sbuff_parse_rules_t	p_rules = { .escapes = &fr_value_escape_double };
 
-	dec_len = xlat_tokenize(NULL, &head, &FR_SBUFF_IN(in, input_len), &p_rules,
+	dec_len = xlat_tokenize(NULL, &head, NULL, &FR_SBUFF_IN(in, input_len), &p_rules,
 				&(tmpl_rules_t) { .dict_def = cc->active_dict ? cc->active_dict : cc->config->dict });
 	if (dec_len <= 0) {
 		fr_strerror_printf_push("ERROR offset %d", (int) -dec_len);
@@ -2187,7 +2187,7 @@ static size_t command_xlat_argv(command_result_t *result, command_file_ctx_t *cc
 	size_t		input_len = strlen(in);
 	char		buff[1024];
 
-	slen = xlat_tokenize_argv(cc->tmp_ctx, &head, &FR_SBUFF_IN(in, input_len),
+	slen = xlat_tokenize_argv(cc->tmp_ctx, &head, NULL, &FR_SBUFF_IN(in, input_len),
 				  NULL,
 				  &(tmpl_rules_t) { .dict_def = cc->active_dict ? cc->active_dict : cc->config->dict });
 	if (slen <= 0) {

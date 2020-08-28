@@ -1365,14 +1365,16 @@ static int cf_parse_tmpl_pass2(CONF_SECTION *cs, tmpl_t **out, CONF_PAIR *cp, fr
 	case TMPL_TYPE_LIST:
 	case TMPL_TYPE_DATA:
 	case TMPL_TYPE_EXEC:
-	case TMPL_TYPE_XLAT_UNRESOLVED:
+	case TMPL_TYPE_EXEC_UNRESOLVED:
 	case TMPL_TYPE_XLAT:
+	case TMPL_TYPE_XLAT_UNRESOLVED:
 		break;
 
 	case TMPL_TYPE_UNINITIALISED:
-	case TMPL_TYPE_REGEX_UNRESOLVED:
-	case TMPL_TYPE_REGEX_XLAT:
 	case TMPL_TYPE_REGEX:
+	case TMPL_TYPE_REGEX_UNCOMPILED:
+	case TMPL_TYPE_REGEX_XLAT:
+	case TMPL_TYPE_REGEX_XLAT_UNRESOLVED:
 	case TMPL_TYPE_NULL:
 	case TMPL_TYPE_MAX:
 		fr_assert(0);
@@ -1504,7 +1506,7 @@ int cf_section_parse_pass2(void *base, CONF_SECTION *cs)
 			/*
 			 *	xlat expansions should be parseable.
 			 */
-			slen = xlat_tokenize(cs, &xlat,
+			slen = xlat_tokenize(cs, &xlat, NULL,
 					     &FR_SBUFF_IN(cp->value, talloc_array_length(cp->value) - 1), NULL,
 					     &(tmpl_rules_t){
 						.dict_def = dict,

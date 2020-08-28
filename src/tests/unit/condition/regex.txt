@@ -50,8 +50,11 @@ match ERROR offset 13 Duplicate regex flag 'i'
 #  And print them correctly
 #
 
+condition &User-Name =~ /@|./
+match &User-Name =~ /@|./
+
 condition &User-Name =~ /@|\\/
-match &User-Name =~ /@|\\/
+match ERROR offset 17 \ at end of pattern
 
 condition &User-Name =~ /^([^\\]*)\\(.*)$/
 match &User-Name =~ /^([^\\]*)\\(.*)$/
@@ -66,4 +69,4 @@ condition &User-Name == /foo/
 match ERROR offset 14 Unexpected regular expression
 
 count
-match 37
+match 39

@@ -151,183 +151,27 @@ default_actions[MOD_COUNT][RLM_MODULE_NUMCODES] =
 	}
 };
 
-static bool pass2_fixup_xlat(CONF_ITEM const *ci, tmpl_t **pvpt, bool convert,
-			       fr_dict_attr_t const *da, tmpl_rules_t const *rules)
+static bool pass2_fixup_tmpl(TALLOC_CTX *ctx, tmpl_t **vpt_p)
 {
-	ssize_t slen;
-	xlat_exp_t *head;
-	tmpl_t *vpt;
-
-	vpt = *pvpt;
-
-	fr_assert(tmpl_is_xlat_unresolved(vpt));
-
-	slen = xlat_tokenize(vpt, &head, &FR_SBUFF_IN(vpt->name, talloc_array_length(vpt->name) - 1), NULL, rules);
-
-	if (slen < 0) {
-		char *spaces, *text;
-
-		fr_canonicalize_error(vpt, &spaces, &text, slen, vpt->name);
-
-		cf_log_err(ci, "Failed parsing expansion string:");
-		cf_log_err(ci, "%s", text);
-		cf_log_err(ci, "%s^ %s", spaces, fr_strerror());
-
-		talloc_free(spaces);
-		talloc_free(text);
-		return false;
-	}
-
-	/*
-	 *	Convert %{Attribute-Name} to &Attribute-Name
-	 */
-	if (convert) {
-		tmpl_t *attr;
-
-		attr = xlat_to_tmpl_attr(talloc_parent(vpt), head);
-		if (attr) {
-			/*
-			 *	If it's a virtual attribute, leave it
-			 *	alone.
-			 */
-			if (tmpl_da(attr)->flags.virtual) {
-				talloc_free(attr);
-				return true;
-			}
-
-			/*
-			 *	If the attribute is of incompatible
-			 *	type, leave it alone.
-			 */
-			if (da && (da->type != tmpl_da(attr)->type)) {
-				talloc_free(attr);
-				return true;
-			}
-
-			if (cf_item_is_pair(ci)) {
-				CONF_PAIR *cp = cf_item_to_pair(ci);
-
-				WARN("%s[%d]: Please change \"%%{%s}\" to &%s",
-				       cf_filename(cp), cf_lineno(cp),
-				       attr->name, attr->name);
-			} else {
-				CONF_SECTION *cs = cf_item_to_section(ci);
-
-				WARN("%s[%d]: Please change \"%%{%s}\" to &%s",
-				       cf_filename(cs), cf_lineno(cs),
-				       attr->name, attr->name);
-			}
-			TALLOC_FREE(*pvpt);
-			*pvpt = attr;
-			return true;
-		}
-	}
-
-	/*
-	 *	Re-write it to be a pre-parsed XLAT structure.
-	 */
-	vpt->type = TMPL_TYPE_XLAT;
-	tmpl_xlat(vpt) = head;
-
-	return true;
-}
-
-
-#ifdef HAVE_REGEX
-static bool pass2_fixup_regex(CONF_ITEM const *ci, tmpl_t *vpt, tmpl_rules_t const *rules)
-{
-	ssize_t slen;
-	regex_t *preg;
-
-	fr_assert(tmpl_is_regex_unresolved(vpt));
-
-	/*
-	 *	It's a dynamic expansion.  We can't expand the string,
-	 *	but we can pre-parse it as an xlat struct.  In that
-	 *	case, we convert it to a pre-compiled XLAT.
-	 *
-	 *	This is a little more complicated than it needs to be
-	 *	because cond_eval_map() keys off of the src
-	 *	template type, instead of the operators.  And, the
-	 *	pass2_fixup_xlat() function expects to get passed an
-	 *	XLAT instead of a REGEX.
-	 */
-	if (strchr(vpt->name, '%')) {
-		vpt->type = TMPL_TYPE_REGEX_XLAT;
-		return pass2_fixup_xlat(ci, &vpt, false, NULL, rules);
-	}
-
-	slen = regex_compile(vpt, &preg, vpt->name, vpt->len, &tmpl_regex_flags(vpt), true, false);
-	if (slen <= 0) {
-		char *spaces, *text;
-
-		fr_canonicalize_error(vpt, &spaces, &text, slen, vpt->name);
-
-		cf_log_err(ci, "Invalid regular expression:");
-		cf_log_err(ci, "%s", text);
-		cf_log_perr(ci, "%s^", spaces);
-
-		talloc_free(spaces);
-		talloc_free(text);
-
-		return false;
-	}
-
-	vpt->type = TMPL_TYPE_REGEX;
-	tmpl_preg(vpt) = preg;
-
-	return true;
-}
-#endif
-
-static bool pass2_fixup_undefined(CONF_ITEM const *ci, tmpl_t *vpt, tmpl_rules_t const *rules)
-{
-	fr_assert(tmpl_is_attr_unresolved(vpt));
-
-	if (tmpl_attr_resolve_unresolved(vpt, rules) < 0) {
-		cf_log_perr(ci, "Failed resolving undefined attribute");
-		return false;
-	}
-
-	return true;
-}
-
-
-static bool pass2_fixup_tmpl(CONF_ITEM const *ci, tmpl_t **pvpt, tmpl_rules_t const *rules, bool convert)
-{
-	tmpl_t *vpt = *pvpt;
-
-	if (tmpl_is_xlat_unresolved(vpt)) {
-		return pass2_fixup_xlat(ci, pvpt, convert, NULL, rules);
-	}
-
-	/*
-	 *	The existence check might have been &Foo-Bar,
-	 *	where Foo-Bar is defined by a module.
-	 */
-	if (tmpl_is_attr_unresolved(vpt)) {
-		return pass2_fixup_undefined(ci, vpt, rules);
-	}
+	tmpl_t *vpt = *vpt_p;
 
 	/*
 	 *	Convert virtual &Attr-Foo to "%{Attr-Foo}"
 	 */
 	if (tmpl_is_attr(vpt) && tmpl_da(vpt)->flags.virtual) {
-		tmpl_xlat(vpt) = xlat_from_tmpl_attr(vpt, vpt);
-		vpt->type = TMPL_TYPE_XLAT;
+		if (tmpl_attr_to_xlat(ctx, vpt_p) < 0) return false;
+		return true;
 	}
 
-
-#ifndef NDEBUG
-	if (tmpl_is_exec(vpt)) {
-		fr_assert(tmpl_xlat(vpt) != NULL);
-	}
-#endif
+	/*
+	 *	Fixup any other tmpl types
+	 */
+	if (tmpl_resolve(vpt) < 0) return false;
 
 	return true;
 }
 
-static bool pass2_fixup_map(fr_cond_t *c, tmpl_rules_t const *rules)
+static bool pass2_fixup_map(fr_cond_t *c)
 {
 	tmpl_t		*vpt;
 	vp_map_t		*map;
@@ -361,17 +205,17 @@ static bool pass2_fixup_map(fr_cond_t *c, tmpl_rules_t const *rules)
 		 *	Resolve the attribute references first
 		 */
 		if (tmpl_is_attr_unresolved(map->lhs)) {
-			if (!pass2_fixup_undefined(map->ci, map->lhs, rules)) return false;
+			if (!pass2_fixup_tmpl(map, &map->lhs)) return false;
 			if (!cast) cast = tmpl_da(map->lhs);
 		}
 
 		if (tmpl_is_attr_unresolved(map->rhs)) {
-			if (!pass2_fixup_undefined(map->ci, map->rhs, rules)) return false;
+			if (!pass2_fixup_tmpl(map, &map->rhs)) return false;
 			if (!cast) cast = tmpl_da(map->rhs);
 		}
 
 		/*
-		 *	Then fixup the other side if it was unparsed
+		 *	Then fixup the other side if it was unresolved
 		 */
 		if (tmpl_is_unresolved(map->lhs)) {
 			switch (cast->type) {
@@ -448,11 +292,11 @@ static bool pass2_fixup_map(fr_cond_t *c, tmpl_rules_t const *rules)
 		 *	@todo v3.1: allow anything anywhere.
 		 */
 		if (!tmpl_is_unresolved(map->rhs)) {
-			if (!pass2_fixup_xlat(map->ci, &map->lhs, false, NULL, rules)) {
+			if (!pass2_fixup_tmpl(map, &map->lhs)) {
 				return false;
 			}
 		} else {
-			if (!pass2_fixup_xlat(map->ci, &map->lhs, true, NULL, rules)) {
+			if (!pass2_fixup_tmpl(map, &map->lhs)) {
 				return false;
 			}
 
@@ -525,25 +369,25 @@ static bool pass2_fixup_map(fr_cond_t *c, tmpl_rules_t const *rules)
 
 			if (!c->cast) da = tmpl_da(map->lhs);
 
-			if (!pass2_fixup_xlat(map->ci, &map->rhs, true, da, rules)) {
+			if (!pass2_fixup_tmpl(map, &map->rhs)) {
 				return false;
 			}
 
 		} else {
-			if (!pass2_fixup_xlat(map->ci, &map->rhs, false, NULL, rules)) {
+			if (!pass2_fixup_tmpl(map, &map->rhs)) {
 				return false;
 			}
 		}
 	}
 
-	if (tmpl_is_exec(map->lhs)) {
-		if (!pass2_fixup_tmpl(map->ci, &map->lhs, rules, false)) {
+	if (tmpl_is_exec_unresolved(map->lhs)) {
+		if (!pass2_fixup_tmpl(map, &map->lhs)) {
 			return false;
 		}
 	}
 
-	if (tmpl_is_exec(map->rhs)) {
-		if (!pass2_fixup_tmpl(map->ci, &map->rhs, rules, false)) {
+	if (tmpl_is_exec_unresolved(map->rhs)) {
+		if (!pass2_fixup_tmpl(map, &map->rhs)) {
 			return false;
 		}
 	}
@@ -583,12 +427,12 @@ static bool pass2_fixup_map(fr_cond_t *c, tmpl_rules_t const *rules)
 	}
 
 #ifdef HAVE_REGEX
-	if (tmpl_is_regex_unresolved(map->rhs)) {
-		if (!pass2_fixup_regex(map->ci, map->rhs, rules)) {
+	if (tmpl_is_regex_xlat_unresolved(map->rhs)) {
+		if (!pass2_fixup_tmpl(map, &map->rhs)) {
 			return false;
 		}
 	}
-	fr_assert(!tmpl_is_regex_unresolved(map->lhs));
+	fr_assert(!tmpl_is_regex_xlat_unresolved(map->lhs));
 #endif
 
 	/*
@@ -600,8 +444,8 @@ static bool pass2_fixup_map(fr_cond_t *c, tmpl_rules_t const *rules)
 	vpt = c->data.map->lhs;
 	if (tmpl_is_attr(vpt) && tmpl_da(vpt)->flags.virtual) {
 		if (!c->cast) c->cast = tmpl_da(vpt);
-		tmpl_xlat(vpt) = xlat_from_tmpl_attr(vpt, vpt);
-		vpt->type = TMPL_TYPE_XLAT;
+
+		if (tmpl_attr_to_xlat(c, &vpt) < 0) return false;
 	}
 
 	/*
@@ -621,7 +465,7 @@ static bool pass2_fixup_map(fr_cond_t *c, tmpl_rules_t const *rules)
 
 	if (!paircmp_find(tmpl_da(map->lhs))) return true;
 
-	if (tmpl_is_regex_unresolved(map->rhs)) {
+	if (tmpl_is_regex_xlat_unresolved(map->rhs)) {
 		cf_log_err(map->ci, "Cannot compare virtual attribute %s via a regex", map->lhs->name);
 		return false;
 	}
@@ -645,10 +489,8 @@ static bool pass2_fixup_map(fr_cond_t *c, tmpl_rules_t const *rules)
 	return true;
 }
 
-static bool pass2_cond_callback(fr_cond_t *c, void *uctx)
+static bool pass2_cond_callback(fr_cond_t *c, UNUSED void *uctx)
 {
-	unlang_compile_t	*unlang_ctx = uctx;
-
 	switch (c->type) {
 	/*
 	 *	These don't get optimized.
@@ -667,14 +509,14 @@ static bool pass2_cond_callback(fr_cond_t *c, void *uctx)
 	 *	Fix up the template.
 	 */
 	case COND_TYPE_EXISTS:
-		fr_assert(!tmpl_is_regex_unresolved(c->data.vpt));
-		return pass2_fixup_tmpl(c->ci, &c->data.vpt, unlang_ctx->rules, true);
+		fr_assert(!tmpl_is_regex_xlat_unresolved(c->data.vpt));
+		return pass2_fixup_tmpl(c, &c->data.vpt);
 
 	/*
 	 *	Fixup the map
 	 */
 	case COND_TYPE_MAP:
-		return pass2_fixup_map(c, unlang_ctx->rules);
+		return pass2_fixup_map(c);
 
 	/*
 	 *	Nothing else has pass2 fixups
@@ -694,13 +536,13 @@ static bool pass2_fixup_update_map(vp_map_t *map, tmpl_rules_t const *rules, fr_
 		 *	FIXME: compile to attribute && handle
 		 *	the conversion in map_to_vp().
 		 */
-		if (!pass2_fixup_xlat(map->ci, &map->lhs, false, NULL, rules)) {
+		if (!pass2_fixup_tmpl(map, &map->lhs)) {
 			return false;
 		}
 	}
 
 	if (tmpl_is_exec(map->lhs)) {
-		if (!pass2_fixup_tmpl(map->ci, &map->lhs, rules, false)) {
+		if (!pass2_fixup_tmpl(map, &map->lhs)) {
 			return false;
 		}
 	}
@@ -709,7 +551,7 @@ static bool pass2_fixup_update_map(vp_map_t *map, tmpl_rules_t const *rules, fr_
 	 *	Deal with undefined attributes now.
 	 */
 	if (tmpl_is_attr_unresolved(map->lhs)) {
-		if (!pass2_fixup_undefined(map->ci, map->lhs, rules)) return false;
+		if (!pass2_fixup_tmpl(map, &map->lhs)) return false;
 	}
 
 	/*
@@ -756,19 +598,19 @@ static bool pass2_fixup_update_map(vp_map_t *map, tmpl_rules_t const *rules, fr_
 			 *	FIXME: compile to attribute && handle
 			 *	the conversion in map_to_vp().
 			 */
-			if (!pass2_fixup_xlat(map->ci, &map->rhs, false, NULL, rules)) {
+			if (!pass2_fixup_tmpl(map, &map->rhs)) {
 				return false;
 			}
 		}
 
-		fr_assert(!tmpl_is_regex_unresolved(map->rhs));
+		fr_assert(!tmpl_is_regex_xlat_unresolved(map->rhs));
 
 		if (tmpl_is_attr_unresolved(map->rhs)) {
-			if (!pass2_fixup_undefined(map->ci, map->rhs, rules)) return false;
+			if (!pass2_fixup_tmpl(map, &map->rhs)) return false;
 		}
 
 		if (tmpl_is_exec(map->rhs)) {
-			if (!pass2_fixup_tmpl(map->ci, &map->rhs, rules, false)) {
+			if (!pass2_fixup_tmpl(map, &map->rhs)) {
 				return false;
 			}
 		}
@@ -824,7 +666,7 @@ static bool pass2_fixup_map_rhs(unlang_group_t *g, tmpl_rules_t const *rules)
 	 */
 	if (!g->vpt) return true;
 
-	return pass2_fixup_tmpl(g->map->ci, &g->vpt, rules, false);
+	return pass2_fixup_tmpl(g->map->ci, &g->vpt);
 }
 
 static void unlang_dump(unlang_t *instruction, int depth)
@@ -2084,7 +1926,7 @@ static unlang_t *compile_switch(UNUSED unlang_t *parent, unlang_compile_t *unlan
 	 *	This is so that compile_case() can do attribute type
 	 *	checks / casts against us.
 	 */
-	if (!pass2_fixup_tmpl(cf_section_to_item(g->cs), &g->vpt, unlang_ctx->rules, true)) {
+	if (!pass2_fixup_tmpl(g, &g->vpt)) {
 		talloc_free(g);
 		return NULL;
 	}
@@ -2211,7 +2053,7 @@ static unlang_t *compile_case(unlang_t *parent, unlang_compile_t *unlang_ctx, CO
 		}
 
 		if (tmpl_is_attr_unresolved(vpt)) {
-			if (!pass2_fixup_undefined(cf_section_to_item(cs), vpt, unlang_ctx->rules)) {
+			if (!pass2_fixup_tmpl(parent, &vpt)) {
 				talloc_free(vpt);
 				return NULL;
 			}
@@ -2253,14 +2095,14 @@ static unlang_t *compile_case(unlang_t *parent, unlang_compile_t *unlang_ctx, CO
 			 *	Don't expand xlat's into an
 			 *	attribute of a different type.
 			 */
-			if (!pass2_fixup_xlat(cf_section_to_item(cs), &vpt, true, da, unlang_ctx->rules)) {
+			if (!pass2_fixup_tmpl(parent, &vpt)) {
 				talloc_free(vpt);
 				return NULL;
 			}
 		}
 
 		if (tmpl_is_exec(vpt)) {
-			if (!pass2_fixup_tmpl(cf_section_to_item(cs), &vpt, unlang_ctx->rules, false)) {
+			if (!pass2_fixup_tmpl(parent, &vpt)) {
 				talloc_free(vpt);
 				return NULL;
 			}
@@ -2466,12 +2308,11 @@ static unlang_t *compile_return(unlang_t *parent, unlang_compile_t *unlang_ctx, 
 static unlang_t *compile_tmpl(unlang_t *parent,
 			      unlang_compile_t *unlang_ctx, CONF_PAIR *cp)
 {
-	unlang_t *c;
-	unlang_tmpl_t *ut;
-	ssize_t slen;
-	char const *p = cf_pair_attr(cp);
-	tmpl_t *vpt;
-	xlat_exp_t *head;
+	unlang_t	*c;
+	unlang_tmpl_t	*ut;
+	ssize_t		slen;
+	char const	*p = cf_pair_attr(cp);
+	tmpl_t		*vpt;
 
 	ut = talloc_zero(parent, unlang_tmpl_t);
 
@@ -2482,19 +2323,14 @@ static unlang_t *compile_tmpl(unlang_t *parent,
 	c->debug_name = c->name;
 	c->type = UNLANG_TYPE_TMPL;
 
-	if (cf_pair_attr_quote(cp) == T_BACK_QUOTED_STRING) {
-		ut->inline_exec = true;
-	}
-
 	slen = tmpl_afrom_substr(ut, &vpt,
 				 &FR_SBUFF_IN(p, talloc_array_length(p) - 1),
-				 T_DOUBLE_QUOTED_STRING,
+				 cf_pair_attr_quote(cp),
 				 NULL,
 				 unlang_ctx->rules);
 	if (slen <= 0) {
 		char *spaces, *text;
 
-	error:
 		fr_canonicalize_error(cp, &spaces, &text, slen, fr_strerror());
 
 		cf_log_err(cp, "Syntax error");
@@ -2507,26 +2343,6 @@ static unlang_t *compile_tmpl(unlang_t *parent,
 
 		return NULL;
 	}
-
-	/*
-	 *	Ensure that the expansions are precompiled.
-	 */
-	if (ut->inline_exec) {
-		slen = xlat_tokenize_argv(vpt, &head, &FR_SBUFF_IN(vpt->name, talloc_array_length(vpt->name) - 1), NULL, unlang_ctx->rules);
-	} else {
-		slen = xlat_tokenize(vpt, &head, &FR_SBUFF_IN(vpt->name, talloc_array_length(vpt->name) - 1), NULL, unlang_ctx->rules);
-	}
-	if (slen <= 0) {
-		p = vpt->name;
-		goto error;
-	}
-
-	/*
-	 *	Re-write it to be a pre-parsed XLAT structure.
-	 */
-	vpt->type = TMPL_TYPE_XLAT;
-	tmpl_xlat(vpt) = head;
-
 	ut->tmpl = vpt;	/* const issues */
 
 	compile_action_defaults(c, unlang_ctx);
@@ -2757,7 +2573,7 @@ static unlang_t *compile_load_balance_subsection(unlang_t *parent, unlang_compil
 		/*
 		 *	Fixup the templates
 		 */
-		if (!pass2_fixup_tmpl(cf_section_to_item(g->cs), &g->vpt, unlang_ctx->rules, true)) {
+		if (!pass2_fixup_tmpl(g, &g->vpt)) {
 			talloc_free(g);
 			return NULL;
 		}

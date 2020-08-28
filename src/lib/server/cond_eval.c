@@ -165,7 +165,6 @@ int cond_eval_tmpl(REQUEST *request, int modreturn, UNUSED int depth, tmpl_t con
 		break;
 
 	case TMPL_TYPE_XLAT:
-	case TMPL_TYPE_XLAT_UNRESOLVED:
 	case TMPL_TYPE_EXEC:
 	{
 		char	*p;
@@ -187,9 +186,10 @@ int cond_eval_tmpl(REQUEST *request, int modreturn, UNUSED int depth, tmpl_t con
 	/*
 	 *	Can't have a bare ... (/foo/) ...
 	 */
-	case TMPL_TYPE_REGEX_UNRESOLVED:
 	case TMPL_TYPE_REGEX:
+	case TMPL_TYPE_REGEX_UNCOMPILED:
 	case TMPL_TYPE_REGEX_XLAT:
+	case TMPL_TYPE_REGEX_XLAT_UNRESOLVED:
 		fr_assert(0 == 1);
 		FALL_THROUGH;
 
@@ -230,14 +230,14 @@ static int cond_do_regex(REQUEST *request, fr_cond_t const *c,
 
 	switch (map->rhs->type) {
 	case TMPL_TYPE_REGEX: /* pre-compiled to a regex */
-		preg = tmpl_preg(map->rhs);
+		preg = tmpl_regex(map->rhs);
 		break;
 
 	default:
 		if (!fr_cond_assert(rhs && rhs->type == FR_TYPE_STRING)) return -1;
 		if (!fr_cond_assert(rhs && rhs->vb_strvalue)) return -1;
 		slen = regex_compile(request, &rreg, rhs->vb_strvalue, rhs->datum.length,
-				     &tmpl_regex_flags(map->rhs), true, true);
+				     tmpl_regex_flags(map->rhs), true, true);
 		if (slen <= 0) {
 			REMARKER(rhs->vb_strvalue, -slen, "%s", fr_strerror());
 			EVAL_DEBUG("FAIL %d", __LINE__);
@@ -562,7 +562,6 @@ do {\
 	 */
 	case TMPL_TYPE_UNRESOLVED:
 	case TMPL_TYPE_EXEC:
-	case TMPL_TYPE_XLAT_UNRESOLVED:
 	case TMPL_TYPE_XLAT:
 	{
 		ssize_t ret;
@@ -608,7 +607,10 @@ do {\
 	case TMPL_TYPE_LIST:
 	case TMPL_TYPE_UNINITIALISED:
 	case TMPL_TYPE_ATTR_UNRESOLVED:
-	case TMPL_TYPE_REGEX_UNRESOLVED:	/* Should now be a TMPL_TYPE_REGEX or TMPL_TYPE_XLAT */
+	case TMPL_TYPE_XLAT_UNRESOLVED:		/* should now be a TMPL_TYPE_XLAT */
+	case TMPL_TYPE_EXEC_UNRESOLVED:		/* should now be a TMPL_TYPE_EXEC */
+	case TMPL_TYPE_REGEX_UNCOMPILED:	/* should now be a TMPL_TYPE_REGEX */
+	case TMPL_TYPE_REGEX_XLAT_UNRESOLVED:	/* Should now be a TMPL_TYPE_REGEX_XLAT */
 	case TMPL_TYPE_MAX:
 		fr_assert(0);
 		rcode = -1;
@@ -686,7 +688,6 @@ int cond_eval_map(REQUEST *request, UNUSED int modreturn, UNUSED int depth, fr_c
 
 	case TMPL_TYPE_UNRESOLVED:
 	case TMPL_TYPE_EXEC:
-	case TMPL_TYPE_XLAT_UNRESOLVED:
 	case TMPL_TYPE_XLAT:
 	{
 		char		*p = NULL;
@@ -716,7 +717,10 @@ int cond_eval_map(REQUEST *request, UNUSED int modreturn, UNUSED int depth, fr_c
 	case TMPL_TYPE_NULL:
 	case TMPL_TYPE_ATTR_UNRESOLVED:
 	case TMPL_TYPE_UNINITIALISED:
-	case TMPL_TYPE_REGEX_UNRESOLVED:		/* should now be a TMPL_TYPE_REGEX or TMPL_TYPE_REGEX_XLAT */
+	case TMPL_TYPE_EXEC_UNRESOLVED:		/* should now be a TMPL_TYPE_EXEC */
+	case TMPL_TYPE_XLAT_UNRESOLVED:		/* should now be a TMPL_TYPE_XLAT */
+	case TMPL_TYPE_REGEX_UNCOMPILED:	/* should now be a TMPL_TYPE_REGEX */
+	case TMPL_TYPE_REGEX_XLAT_UNRESOLVED:	/* should now be a TMPL_TYPE_REGEX_XLAT */
 	case TMPL_TYPE_REGEX:			/* not allowed as LHS */
 	case TMPL_TYPE_REGEX_XLAT:		/* not allowed as LHS */
 	case TMPL_TYPE_MAX:

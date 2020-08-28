@@ -452,11 +452,8 @@ int map_to_list_mod(TALLOC_CTX *ctx, vp_list_mod_t **out,
 
 	switch (mutated->rhs->type) {
 	case TMPL_TYPE_XLAT:
-		fr_assert(tmpl_xlat(mutated->rhs) != NULL);
-		FALL_THROUGH;
-
-	case TMPL_TYPE_XLAT_UNRESOLVED:
 	{
+		fr_assert(tmpl_xlat(mutated->rhs) != NULL);
 		fr_cursor_t	from;
 		fr_value_box_t	*vb, *n_vb;
 
@@ -864,7 +861,6 @@ static inline void map_list_mod_debug(REQUEST *request,
 	 *	Just print the value being assigned
 	 */
 	default:
-	case TMPL_TYPE_XLAT_UNRESOLVED:
 	case TMPL_TYPE_XLAT:
 	case TMPL_TYPE_UNRESOLVED:
 	case TMPL_TYPE_DATA:

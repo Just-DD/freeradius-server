@@ -257,7 +257,7 @@ static ssize_t cond_check_cast(fr_cond_t *c, char const *start,
 	}
 
 #ifdef HAVE_REGEX
-	if (tmpl_is_regex_unresolved(c->data.map->rhs)) {
+	if (tmpl_contains_regex(c->data.map->rhs)) {
 		fr_strerror_printf("Cannot use cast with regex comparison");
 		return -(rhs - start);
 	}
@@ -934,26 +934,26 @@ static int cond_normalise(TALLOC_CTX *ctx, fr_token_t lhs_type, fr_cond_t **c_ou
 		case TMPL_TYPE_EXEC:
 			break;
 
-			/*
-			 *	'true' and 'false' are special strings
-			 *	which mean themselves.
-			 *
-			 *	For integers, 0 is false, all other
-			 *	integers are true.
-			 *
-			 *	For strings, '' and "" are false.
-			 *	'foo' and "foo" are true.
-			 *
-			 *	The str2tmpl function takes care of
-			 *	marking "%{foo}" as TMPL_TYPE_XLAT_UNRESOLVED, so
-			 *	the strings here are fixed at compile
-			 *	time.
-			 *
-			 *	`exec` and "%{...}" are left alone.
-			 *
-			 *	Bare words must be module return
-			 *	codes.
-			 */
+		/*
+		 *	'true' and 'false' are special strings
+		 *	which mean themselves.
+		 *
+		 *	For integers, 0 is false, all other
+		 *	integers are true.
+		 *
+		 *	For strings, '' and "" are false.
+		 *	'foo' and "foo" are true.
+		 *
+		 *	The str2tmpl function takes care of
+		 *	marking "%{foo}" as TMPL_TYPE_XLAT_UNRESOLVED, so
+		 *	the strings here are fixed at compile
+		 *	time.
+		 *
+		 *	`exec` and "%{...}" are left alone.
+		 *
+		 *	Bare words must be module return
+		 *	codes.
+		 */
 		case TMPL_TYPE_UNRESOLVED:
 			if (!*c->data.vpt->name) {
 				c->type = COND_TYPE_FALSE;
@@ -1206,27 +1206,29 @@ static ssize_t cond_tokenize_operand(TALLOC_CTX *ctx, tmpl_t **out,
 	 *	at the start of the flags.
 	 */
 	if (type == T_SOLIDUS_QUOTED_STRING) {
-		int			err;
-		fr_regex_flags_t	regex_flags = { };
-
-		if (!tmpl_is_regex_unresolved(vpt) && !tmpl_is_regex_xlat(vpt)) {
+		if (!tmpl_contains_regex(vpt)) {
 			fr_strerror_printf("Expected regex");
 			fr_sbuff_set(&our_in, &m);
 			goto error;
 		}
 
-		slen = regex_flags_parse(&err, &regex_flags, &our_in, &bareword_terminals, true);
-		switch (err) {
-		case 0:
-			break;
-
-		case -1:	/* Non-flag and non-terminal */
-		case -2:	/* Duplicate flag */
+		slen = tmpl_regex_flags_substr(vpt, &our_in, &bareword_terminals);
+		if (slen < 0) {
 			fr_sbuff_advance(&our_in, slen * -1);
 			goto error;
 		}
 
-		tmpl_regex_flags(vpt) = regex_flags;
+		/*
+		 *	We've now got the expressions and
+		 *	the flags.  Try to compile the
+		 *	regex.
+		 */
+		slen = tmpl_regex_compile(vpt, true, false);
+		if (slen < 0) {
+			fr_sbuff_set(&our_in, &m);	/* Reset to start of expression */
+			fr_sbuff_advance(&our_in, slen * -1);
+			goto error;
+		}
 	}
 #endif
 
@@ -1244,7 +1246,7 @@ static ssize_t cond_tokenize_operand(TALLOC_CTX *ctx, tmpl_t **out,
 		goto error;
 	}
 
-	if (tmpl_unknown_attr_add(vpt) < 0) {
+	if (tmpl_attr_unknown_add(vpt) < 0) {
 		fr_strerror_printf("Failed defining attribute");
 		fr_sbuff_set(&our_in, &m);
 		goto error;
@@ -1419,7 +1421,7 @@ static ssize_t cond_tokenize(TALLOC_CTX *ctx, fr_cond_t **out,
 			goto error;
 		}
 
-		if (tmpl_is_regex_unresolved(lhs)) {
+		if (tmpl_contains_regex(lhs)) {
 			fr_strerror_printf("Unexpected regular expression");
 			fr_sbuff_set(&our_in, &m_lhs);
 			goto error;
@@ -1520,16 +1522,15 @@ static ssize_t cond_tokenize(TALLOC_CTX *ctx, fr_cond_t **out,
 		}
 
 		if (((op == T_OP_REG_EQ) || (op == T_OP_REG_NE)) &&
-		    !tmpl_is_regex_unresolved(lhs) && !tmpl_is_regex_xlat(lhs) &&
-		    !tmpl_is_regex_unresolved(rhs) && !tmpl_is_regex_xlat(rhs)) {
+		    !tmpl_contains_regex(lhs) &&
+		    !tmpl_contains_regex(rhs)) {
 			fr_strerror_printf("Expected regular expression");
 			fr_sbuff_set(&our_in, &m_rhs);
 			goto error;
 		}
 
 		if (((op != T_OP_REG_EQ) && (op != T_OP_REG_NE)) &&
-		    (tmpl_is_regex_unresolved(lhs) || tmpl_is_regex_xlat(lhs) ||
-		     tmpl_is_regex_unresolved(rhs) || tmpl_is_regex_xlat(rhs))) {
+		    (tmpl_contains_regex(lhs) || tmpl_contains_regex(rhs))) {
 		     	fr_strerror_printf("Unexpected regular expression");	/* Fixme should point to correct operand */
 			fr_sbuff_set(&our_in, &m_rhs);
 			goto error;

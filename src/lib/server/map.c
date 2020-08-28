@@ -249,7 +249,7 @@ int map_afrom_cp(TALLOC_CTX *ctx, vp_map_t **out, CONF_PAIR *cp,
 			goto marker;
 		}
 
-		if (tmpl_unknown_attr_add(map->lhs) < 0) {
+		if (tmpl_attr_unknown_add(map->lhs) < 0) {
 			cf_log_perr(cp, "Failed creating attribute %s", map->lhs->name);
 			goto error;
 		}
@@ -267,7 +267,7 @@ int map_afrom_cp(TALLOC_CTX *ctx, vp_map_t **out, CONF_PAIR *cp,
 				 tmpl_parse_rules_unquoted[type],	/* We're not searching for quotes */
 				 rhs_rules);
 	if (slen < 0) goto marker;
-	if (tmpl_unknown_attr_add(map->rhs) < 0) {
+	if (tmpl_attr_unknown_add(map->rhs) < 0) {
 		cf_log_perr(cp, "Failed creating attribute %s", map->rhs->name);
 		goto error;
 	}
@@ -998,30 +998,6 @@ int map_to_vp(TALLOC_CTX *ctx, VALUE_PAIR **out, REQUEST *request, vp_map_t cons
 		*out = n;
 		break;
 
-	case TMPL_TYPE_XLAT_UNRESOLVED:
-		fr_assert(tmpl_is_attr(map->lhs));
-		fr_assert(tmpl_da(map->lhs));	/* We need to know which attribute to create */
-
-		MEM(n = fr_pair_afrom_da(ctx, tmpl_da(map->lhs)));
-
-		str = NULL;
-		slen = xlat_aeval(request, &str, request, map->rhs->name, NULL, NULL);
-		if (slen < 0) {
-			rcode = slen;
-			talloc_free(n);
-			goto error;
-		}
-
-		rcode = fr_pair_value_from_str(n, str, -1, '\0', false);
-		talloc_free(str);
-		if (rcode < 0) {
-			fr_pair_list_free(&n);
-			goto error;
-		}
-		n->op = map->op;
-		*out = n;
-		break;
-
 	case TMPL_TYPE_UNRESOLVED:
 		fr_assert(tmpl_is_attr(map->lhs));
 		fr_assert(tmpl_da(map->lhs));	/* We need to know which attribute to create */
@@ -1208,7 +1184,6 @@ int map_to_request(REQUEST *request, vp_map_t const *map, radius_map_getvalue_t 
 	 *	This allows the syntax like:
 	 *	- "Attr-%{number}" := "value"
 	 */
-	case TMPL_TYPE_XLAT_UNRESOLVED:
 	case TMPL_TYPE_XLAT:
 	case TMPL_TYPE_EXEC:
 	{
@@ -1640,7 +1615,6 @@ void map_debug_log(REQUEST *request, vp_map_t const *map, VALUE_PAIR const *vp)
 		rhs = fr_pair_value_asprint(request, vp, fr_token_quote[map->rhs->quote]);
 		break;
 
-	case TMPL_TYPE_XLAT_UNRESOLVED:
 	case TMPL_TYPE_XLAT:
 		rhs = fr_pair_value_asprint(request, vp, fr_token_quote[map->rhs->quote]);
 		break;

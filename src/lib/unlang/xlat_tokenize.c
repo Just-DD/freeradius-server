@@ -71,6 +71,20 @@ static fr_sbuff_parse_rules_t const xlat_rules = {
 	.escapes = &xlat_escape
 };
 
+/** Allocate an xlat node with no name, and no type set
+ *
+ * @param[in] ctx	to allocate node in.
+ * @return A new xlat node.
+ */
+static inline CC_HINT(always_inline) xlat_exp_t *xlat_exp_alloc_null(TALLOC_CTX *ctx)
+{
+	xlat_exp_t *node;
+
+	MEM(node = talloc_zero(ctx, xlat_exp_t));
+
+	return node;
+}
+
 /** Allocate an xlat node
  *
  * @param[in] ctx	to allocate node in.
@@ -78,27 +92,15 @@ static fr_sbuff_parse_rules_t const xlat_rules = {
  * @param[in] in	original input string.
  * @return A new xlat node.
  */
-static inline xlat_exp_t *xlat_exp_alloc(TALLOC_CTX *ctx, xlat_type_t type, char const *in, size_t inlen)
+static inline CC_HINT(always_inline) xlat_exp_t *xlat_exp_alloc(TALLOC_CTX *ctx, xlat_type_t type,
+								char const *in, size_t inlen)
 {
 	xlat_exp_t *node;
 
-	MEM(node = talloc_zero(ctx, xlat_exp_t));
+	node = xlat_exp_alloc_null(ctx);
 	node->type = type;
 	if (in) node->fmt = talloc_bstrndup(node, in, inlen);
 
-	return node;
-}
-
-/** Allocate an xlat node with no name, and no type set
- *
- * @param[in] ctx	to allocate node in.
- * @return A new xlat node.
- */
-static inline xlat_exp_t *xlat_exp_alloc_null(TALLOC_CTX *ctx)
-{
-	xlat_exp_t *node;
-
-	MEM(node = talloc_zero(ctx, xlat_exp_t));
 	return node;
 }
 
@@ -107,91 +109,73 @@ static inline xlat_exp_t *xlat_exp_alloc_null(TALLOC_CTX *ctx)
  * @param[in] node	to set type for.
  * @param[in] type	to set.
  */
-static inline void xlat_exp_set_type(xlat_exp_t *node, xlat_type_t type)
+static inline CC_HINT(always_inline) void xlat_exp_set_type(xlat_exp_t *node, xlat_type_t type)
 {
 	node->type = type;
 }
 
+#if 0
 /** Set the format string for an xlat node
  *
  * @param[in] node	to set fmt for.
  * @param[in] fmt	talloced buffer to set as the fmt string.
  */
-static inline void xlat_exp_set_name_buffer(xlat_exp_t *node, char const *fmt)
+static inline CC_HINT(always_inline) void xlat_exp_set_name_buffer(xlat_exp_t *node, char const *fmt)
 {
 	if (node->fmt) talloc_const_free(node->fmt);
 	node->fmt = talloc_bstrdup(node, fmt);
 }
+#endif
 
 /** Set the format string for an xlat node
  *
  * @param[in] node	to set fmt for.
  * @param[in] fmt	talloced buffer to set as the fmt string.
  */
-static inline void xlat_exp_set_name_buffer_shallow(xlat_exp_t *node, char *fmt)
+static inline CC_HINT(always_inline) void xlat_exp_set_name_buffer_shallow(xlat_exp_t *node, char const *fmt)
 {
 	if (node->fmt) talloc_const_free(node->fmt);
 	node->fmt = fmt;
 }
 
-/** Try to convert an xlat to a tmpl for efficiency
+/** Merge flags from child to parent
  *
- * @param ctx to allocate new tmpl_t in.
- * @param node to convert.
- * @return
- *	- NULL if unable to convert (not necessarily error).
- *	- A new #tmpl_t.
+ * For pass2, if either the parent or child is marked up for pass2, then the parent
+ * is marked up for pass2.
+ *
+ * For needs_async, if both the parent and the child are needs_async, the parent is
+ * needs_async.
  */
-tmpl_t *xlat_to_tmpl_attr(TALLOC_CTX *ctx, xlat_exp_t *node)
+static inline CC_HINT(always_inline) void xlat_flags_merge(xlat_flags_t *parent, xlat_flags_t const *child)
 {
-	tmpl_t *vpt;
-
-	if (node->next || (node->type != XLAT_ATTRIBUTE) || !tmpl_is_attr(node->attr)) return NULL;
-
-	/*
-	 *   Concat means something completely different as an attribute reference
-	 *   Count isn't implemented.
-	 */
-	if ((tmpl_num(node->attr) == NUM_COUNT) || (tmpl_num(node->attr) == NUM_ALL)) return NULL;
-
-	vpt = tmpl_alloc(ctx, TMPL_TYPE_ATTR, T_BARE_WORD, node->fmt, talloc_array_length(node->fmt) - 1);
-	if (!vpt) return NULL;
-
-	tmpl_attr_copy(vpt, node->attr);
-
-	TMPL_VERIFY(vpt);
-
-	return vpt;
+	parent->needs_async |= child->needs_async;
+	parent->needs_resolving |= child->needs_resolving;
 }
 
-/** Convert attr tmpl to an xlat for &attr[*]
+/** Free a linked list of xlat nodes
  *
- * @param ctx to allocate new xlat_expt_t in.
- * @param vpt to convert.
- * @return
- *	- NULL if unable to convert (not necessarily error).
- *	- a new #tmpl_t.
+ * @param[in,out] head	to free.  Will be set to NULL
  */
-xlat_exp_t *xlat_from_tmpl_attr(TALLOC_CTX *ctx, tmpl_t *vpt)
+void xlat_exp_free(xlat_exp_t **head)
 {
-	xlat_exp_t *node;
+	xlat_exp_t *to_free = *head, *next;
 
-	if (!tmpl_is_attr(vpt)) return NULL;
-
-	node = xlat_exp_alloc(ctx, XLAT_ATTRIBUTE, vpt->name, vpt->len);
-	node->attr = tmpl_alloc(node, TMPL_TYPE_ATTR, T_BARE_WORD, node->fmt, talloc_array_length(node->fmt) - 1);
-	tmpl_attr_copy(node->attr, vpt);
-
-	return node;
+	while (to_free) {
+		next = to_free->next;
+		talloc_free(to_free);
+		to_free = next;
+	};
+	*head = NULL;
 }
 
-static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in,
+static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, fr_sbuff_t *in,
 				   tmpl_rules_t const *ar_rules);
 
-static int xlat_tokenize_literal(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in, bool brace,
+static int xlat_tokenize_literal(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, fr_sbuff_t *in,
+				 bool brace,
 				 fr_sbuff_parse_rules_t const *p_rules, tmpl_rules_t const *ar_rules);
 
-static inline int xlat_tokenize_alternation(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in,
+static inline int xlat_tokenize_alternation(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, fr_sbuff_t *in,
 					    tmpl_rules_t const *ar_rules)
 {
 	xlat_exp_t	*node;
@@ -200,7 +184,7 @@ static inline int xlat_tokenize_alternation(TALLOC_CTX *ctx, xlat_exp_t **head, 
 
 	node = xlat_exp_alloc_null(ctx);
 	xlat_exp_set_type(node, XLAT_ALTERNATE);
-	if (xlat_tokenize_expansion(node, &node->child, in, ar_rules) < 0) {
+	if (xlat_tokenize_expansion(node, &node->child, &node->flags, in, ar_rules) < 0) {
 	error:
 		*head = NULL;
 		talloc_free(node);
@@ -217,7 +201,7 @@ static inline int xlat_tokenize_alternation(TALLOC_CTX *ctx, xlat_exp_t **head, 
 	 */
 	if (fr_sbuff_next_if_char(in, '}')) {
 		node->alternate = xlat_exp_alloc(node, XLAT_LITERAL, "", 0);
-		node->async_safe = node->child->async_safe;
+		xlat_flags_merge(&node->flags, &node->child->flags);
 		*head = node;
 		return 0;
 	}
@@ -225,7 +209,8 @@ static inline int xlat_tokenize_alternation(TALLOC_CTX *ctx, xlat_exp_t **head, 
 	/*
 	 *	Parse the alternate expansion.
 	 */
-	if (xlat_tokenize_literal(node, &node->alternate, in, true, &xlat_rules, ar_rules) < 0) goto error;
+	if (xlat_tokenize_literal(node, &node->alternate, &node->flags, in,
+				  true, &xlat_rules, ar_rules) < 0) goto error;
 
 	if (!node->alternate) {
 		talloc_free(node);
@@ -238,7 +223,7 @@ static inline int xlat_tokenize_alternation(TALLOC_CTX *ctx, xlat_exp_t **head, 
 		goto error;
 	}
 
-	node->async_safe = (node->child->async_safe && node->alternate->async_safe);
+	xlat_flags_merge(flags, &node->flags);
 	*head = node;
 
 	return 0;
@@ -251,7 +236,7 @@ static inline int xlat_tokenize_alternation(TALLOC_CTX *ctx, xlat_exp_t **head, 
  * @verbatim %{<num>} @endverbatim
  *
  */
-static inline int xlat_tokenize_regex(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in)
+static inline int xlat_tokenize_regex(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, fr_sbuff_t *in)
 {
 	uint8_t			num;
 	xlat_exp_t		*node;
@@ -288,11 +273,12 @@ static inline int xlat_tokenize_regex(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbu
 
 	node = xlat_exp_alloc(ctx, XLAT_REGEX, fr_sbuff_current(&m_s), fr_sbuff_behind(&m_s));
 	node->regex_index = num;
-	node->async_safe = true;
+	node->flags.needs_async = false;
 
 	fr_sbuff_marker_release(&m_s);
 	fr_sbuff_next(in);	/* Skip '}' */
 
+	xlat_flags_merge(flags, &node->flags);
 	*head = node;
 
 	return 0;
@@ -304,8 +290,12 @@ static inline int xlat_tokenize_regex(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbu
  * Parses a function call string in the format
  * @verbatim %{<func>:<arguments} @endverbatim
  *
+ * @return
+ *	- 0 if the string was parsed into a function.
+ *	- 1 if the string was not a function.
+ *	- <0 on parse error.
  */
-static inline int xlat_tokenize_function(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in,
+static inline int xlat_tokenize_function(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, fr_sbuff_t *in,
 					 tmpl_rules_t const *rules)
 {
 	xlat_exp_t		*node;
@@ -330,20 +320,28 @@ static inline int xlat_tokenize_function(TALLOC_CTX *ctx, xlat_exp_t **head, fr_
 	fr_sbuff_adv_past_allowed(in, SIZE_MAX, func_chars);
 
 	if (!fr_sbuff_is_char(in, ':')) {
-	not_a_function:
 		fr_sbuff_set(in, &m_s);		/* backtrack */
 		fr_sbuff_marker_release(&m_s);
 		return 1;
 	}
 
 	func = xlat_func_find(fr_sbuff_current(&m_s), fr_sbuff_behind(&m_s));
-	if (!func) goto not_a_function;
 
 	/*
 	 *	Allocate a node to hold the function
 	 */
 	node = xlat_exp_alloc(ctx, XLAT_FUNC, fr_sbuff_current(&m_s), fr_sbuff_behind(&m_s));
-	node->xlat = func;
+	if (!func) {
+		if (!rules || !rules->allow_unresolved) {
+			fr_strerror_printf("Unknown function %pV",
+					   fr_box_strvalue_len(fr_sbuff_current(&m_s), fr_sbuff_behind(&m_s)));
+			return -1;
+		}
+		xlat_exp_set_type(node, XLAT_FUNC_UNRESOLVED);
+		node->flags.needs_resolving = true;	/* Needs resolution during pass2 */
+	} else {
+		node->call.func = func;
+	}
 
 	fr_sbuff_next(in);			/* Skip the ':' */
 	XLAT_DEBUG("FUNC-ARGS <-- %s ... %pV",
@@ -355,7 +353,7 @@ static inline int xlat_tokenize_function(TALLOC_CTX *ctx, xlat_exp_t **head, fr_
 	 *	Now parse the child nodes that form the
 	 *	function's arguments.
 	 */
-	if (xlat_tokenize_literal(node, &node->child, in, true, &xlat_rules, rules) < 0) {
+	if (xlat_tokenize_literal(node, &node->child, &node->flags, in, true, &xlat_rules, rules) < 0) {
 	error:
 		*head = NULL;
 		talloc_free(node);
@@ -367,7 +365,7 @@ static inline int xlat_tokenize_function(TALLOC_CTX *ctx, xlat_exp_t **head, fr_
 		goto error;
 	}
 
-	node->async_safe = (func->async_safe && (!node->child || node->child->async_safe));
+	xlat_flags_merge(flags, &node->flags);
 	*head = node;
 
 	return 0;
@@ -376,12 +374,12 @@ static inline int xlat_tokenize_function(TALLOC_CTX *ctx, xlat_exp_t **head, fr_
 /** Parse an attribute ref or a virtual attribute
  *
  */
-static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in,
+static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, fr_sbuff_t *in,
 					  fr_sbuff_parse_rules_t const *p_rules, tmpl_rules_t const *ar_rules)
 {
 	ssize_t			slen;
 	attr_ref_error_t	err;
-	tmpl_t		*vpt = NULL;
+	tmpl_t			*vpt = NULL;
 	xlat_exp_t		*node;
 	xlat_t			*func;
 	fr_sbuff_marker_t	m_s;
@@ -419,8 +417,8 @@ static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, fr
 		 *	as it was more likely to be a bad module name,
 		 *	than a request qualifier.
 		 */
-		if ((err == ATTR_REF_ERROR_MISSING_TERMINATOR) && fr_sbuff_is_char(in, ':')) {
-			fr_strerror_printf("Unknown expansion function or invalid list qualifier");
+		if (err == ATTR_REF_ERROR_MISSING_TERMINATOR) {
+			fr_strerror_printf("Unknown text after attribute");
 			fr_sbuff_set(in, &m_s);
 		}
 	error:
@@ -434,19 +432,28 @@ static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, fr
 	 *	Might be a virtual XLAT attribute, which is identical
 	 *	to a normal function but called without an argument
 	 *	list.
+	 *
+	 *	We only consider virtual attributes at the top level
+	 *	but we do allow request references and lists to be
+	 *	specified so that the virtual attribute can operate
+	 *	in different contexts (i.e. on the parent request).
 	 */
-	switch (vpt->type) {
-	case TMPL_TYPE_ATTR_UNRESOLVED:
-		func = xlat_func_find(tmpl_attr_unresolved(vpt), -1);
-
-		if (func && (func->type == XLAT_FUNC_LEGACY)) {
+	if ((tmpl_attr_ref_count(vpt) == 1) &&
+	    (tmpl_is_attr_unresolved(vpt) || (tmpl_is_attr(vpt) && tmpl_da(vpt)->flags.virtual))) {
+	    	if (tmpl_is_attr_unresolved(vpt)) {
+			func = xlat_func_find(tmpl_attr_unresolved(vpt), -1);
+		} else {
+			func = xlat_func_find(tmpl_da(vpt)->name, -1);
+		}
+		if (func) {
 			xlat_exp_set_type(node, XLAT_VIRTUAL);
-			xlat_exp_set_name_buffer(node, tmpl_attr_unresolved(vpt));
-			talloc_free(vpt);	/* Free the tmpl, we don't need it */
+			xlat_exp_set_name_buffer_shallow(node, vpt->name);
 
-			XLAT_DEBUG("VIRTUAL <-- %pV", fr_box_strvalue_len(fr_sbuff_current(in), fr_sbuff_remaining(in)));
-			node->xlat = func;
-			node->async_safe = func->async_safe;
+			XLAT_DEBUG("VIRTUAL <-- %pV",
+				   fr_box_strvalue_len(fr_sbuff_current(in), fr_sbuff_remaining(in)));
+			node->call.func = func;
+			node->attr = vpt;	/* Store for context */
+			node->flags.needs_async = func->needs_async;
 
 			if (!fr_sbuff_next_if_char(in, '}')) {
 				fr_strerror_printf("Missing closing brace");
@@ -456,6 +463,10 @@ static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, fr
 			goto done;
 		}
 
+		/*
+		 *	Not a normal attribute, not a virtual attribute
+		 *	and we're not allowing unresolved attributes.
+		 */
 		if (!ar_rules || !ar_rules->allow_unresolved) {
 			talloc_free(vpt);
 
@@ -463,12 +474,23 @@ static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, fr
 			fr_sbuff_set(in, &m_s);		/* Error at the start of the attribute */
 			goto error;
 		}
-		FALL_THROUGH;
 
-	default:
-		xlat_exp_set_name_buffer(node, vpt->name);
+		/*
+		 *	Mark the xlat exp as needing pass2 resolution.
+		 */
+		xlat_exp_set_type(node, XLAT_VIRTUAL_UNRESOLVED);
+		xlat_exp_set_name_buffer_shallow(node, vpt->name);	/* vpt may be freed */
+
+		node->attr = vpt;
+		node->flags.needs_resolving = true;
+	/*
+	 *	It's a straight attribute, nothing special
+	 */
+	} else {
 		xlat_exp_set_type(node, XLAT_ATTRIBUTE);
-		break;
+		xlat_exp_set_name_buffer_shallow(node, vpt->name);
+
+		node->attr = vpt;
 	}
 
 	if (!fr_sbuff_next_if_char(in, '}')) {
@@ -476,16 +498,15 @@ static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, fr
 		goto error;
 	}
 
-	node->attr = vpt;
-	node->async_safe = true;		/* attribute expansions are always async-safe */
-
 done:
+	xlat_flags_merge(flags, &node->flags);
 	*head = node;
 	fr_sbuff_marker_release(&m_s);
 	return 0;
 }
 
-static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in, tmpl_rules_t const *ar_rules)
+static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, fr_sbuff_t *in,
+				   tmpl_rules_t const *ar_rules)
 {
 	size_t			len;
 	fr_sbuff_marker_t	s_m;
@@ -508,7 +529,9 @@ static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_
 	/*
 	 *	%{...}:-bar}
 	 */
-	if (fr_sbuff_adv_past_str_literal(in, "%{")) return xlat_tokenize_alternation(ctx, head, in, ar_rules);
+	if (fr_sbuff_adv_past_str_literal(in, "%{")) {
+		return xlat_tokenize_alternation(ctx, head, flags, in, ar_rules);
+	}
 
 	/*
 	 *	:-bar}
@@ -523,7 +546,7 @@ static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_
 	 *	Handle regex's %{<num>} specially.
 	 */
 	if (fr_sbuff_is_digit(in)) {
-		ret = xlat_tokenize_regex(ctx, head, in);
+		ret = xlat_tokenize_regex(ctx, head, flags, in);
 		if (ret <= 0) return ret;
 	}
 #endif /* HAVE_REGEX */
@@ -563,7 +586,7 @@ static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_
 			return -1;
 
 		case ':':
-			fr_strerror_printf("Missing expansion function or list qualifier");
+			fr_strerror_printf("Missing expansion function");
 			return -1;
 
 		case '[':
@@ -576,9 +599,7 @@ static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_
 	}
 
 	/*
-	 *      Hint token is a ':' it's either:
-	 *	- An xlat function %{<func>:<args}
-	 *	- An attribute reference with a list separator %{<list>:<attr>}
+	 *      Hint token is a ':' it's an xlat function %{<func>:<args}
 	 */
 	switch (hint) {
 	case ':':
@@ -586,10 +607,8 @@ static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_
 		fr_sbuff_set(in, &s_m);		/* backtrack */
 		fr_sbuff_marker_release(&s_m);
 
-		ret = xlat_tokenize_function(ctx, head, in, ar_rules);
+		ret = xlat_tokenize_function(ctx, head, flags, in, ar_rules);
 		if (ret <= 0) return ret;
-
-		if (xlat_tokenize_attribute(ctx, head, in, &attr_p_rules, ar_rules) < 0) return -1;
 	}
 		break;
 
@@ -598,12 +617,13 @@ static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_
 	 *	- '[' - Which is an attribute index, so it must be an attribute.
 	 *      - '}' - The end of the expansion, which means it was a bareword.
 	 */
+	case '.':
 	case '}':
 	case '[':
 		fr_sbuff_set(in, &s_m);		/* backtrack */
 		fr_sbuff_marker_release(&s_m);
 
-		if (xlat_tokenize_attribute(ctx, head, in, &attr_p_rules, ar_rules) < 0) return -1;
+		if (xlat_tokenize_attribute(ctx, head, flags, in, &attr_p_rules, ar_rules) < 0) return -1;
 		break;
 
 	/*
@@ -632,11 +652,25 @@ static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_
  * terminal grammar and escaping rules.
  *
  * This allows us to be smart about processing quotes within the expansions themselves.
+ *
+ * @param[in] ctx		to allocate nodes in.  Note: All nodes will be
+ *				allocated in the same ctx.  This is to allow
+ *				manipulation by xlat instantiation functions
+ *				later.
+ * @param[out] head		Where to write the first child node.
+ * @param[out] flags		where we store flags information for the parent.
+ * @param[in] in		sbuff to parse.
+ * @param[in] brace		true if we're inside a braced expansion, else false.
+ * @param[in] p_rules		that control parsing.
+ * @param[in] ar_rules		that control attribute reference and xlat function parsing.
+ * @return
+ *	- 0 on success.
+ *	- -1 on failure.
  */
-static int xlat_tokenize_literal(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in, bool brace,
+static int xlat_tokenize_literal(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags,
+				 fr_sbuff_t *in, bool brace,
 				 fr_sbuff_parse_rules_t const *p_rules, tmpl_rules_t const *ar_rules)
 {
-	TALLOC_CTX			*our_ctx = ctx;
 	xlat_exp_t			*node = NULL;
 	size_t				len;
 	fr_sbuff_term_t			expansions = FR_SBUFF_TERMS(
@@ -678,7 +712,7 @@ static int xlat_tokenize_literal(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t 
 		/*
 		 *	pre-allocate the node so we don't have to steal it later.
 		 */
-		node = xlat_exp_alloc_null(our_ctx);
+		node = xlat_exp_alloc_null(ctx);
 
 		/*
 		 *	Find the next token
@@ -694,18 +728,16 @@ static int xlat_tokenize_literal(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t 
 
 			XLAT_DEBUG("LITERAL <-- %pV",
 				   fr_box_strvalue_len(str, talloc_array_length(str) - 1));
-			node->async_safe = true; /* literals are always true */
+			node->flags.needs_async = false; /* literals are always true */
 			fr_cursor_insert(&cursor, node);
-			our_ctx = node;
 			node = NULL;
 		}
 
 		if (fr_sbuff_adv_past_str_literal(in, "%{")) {
 			if (len == 0) TALLOC_FREE(node); /* Free the empty node */
 
-			if (xlat_tokenize_expansion(our_ctx, &node, in, ar_rules) < 0) {
+			if (xlat_tokenize_expansion(ctx, &node, flags, in, ar_rules) < 0) {
 			error:
-				*head = NULL;
 				talloc_free(node);
 				fr_cursor_head(&cursor);
 				fr_cursor_free_list(&cursor);
@@ -717,7 +749,6 @@ static int xlat_tokenize_literal(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t 
 				return -1;
 			}
 			fr_cursor_insert(&cursor, node);
-			our_ctx = node;
 			node = NULL;
 			continue;
 		}
@@ -732,16 +763,16 @@ static int xlat_tokenize_literal(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t 
 			if (len == 0) {
 				talloc_free_children(node);	/* re-use empty nodes */
 			} else {
-				node = xlat_exp_alloc_null(our_ctx);
+				node = xlat_exp_alloc_null(ctx);
 			}
 
 			fr_sbuff_out_abstrncpy(node, &str, in, 1);
 			xlat_exp_set_type(node, XLAT_ONE_LETTER);
 			xlat_exp_set_name_buffer_shallow(node, str);
 
-			node->async_safe = true; /* literals are always true */
+			node->flags.needs_async = false; /* literals are always true */
+			xlat_flags_merge(flags, &node->flags);
 			fr_cursor_insert(&cursor, node);
-			our_ctx = node;
 			node = NULL;
 			continue;
 		}
@@ -783,7 +814,8 @@ static int xlat_tokenize_literal(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t 
 				xlat_exp_set_name_buffer_shallow(node, str);
 
 				XLAT_DEBUG("LITERAL <-- (empty)");
-				node->async_safe = true; /* literals are always true */
+				node->flags.needs_async = false; /* literals are always true */
+				xlat_flags_merge(flags, &node->flags);
 				fr_cursor_insert(&cursor, node);
 			}
 		}
@@ -805,25 +837,284 @@ static fr_table_num_sorted_t const xlat_quote_table[] = {
 };
 static size_t xlat_quote_table_len = NUM_ELEMENTS(xlat_quote_table);
 
-/** Tokenize an xlat expansion into a series of XLAT_TYPE_CHILD arguments
+void xlat_debug(xlat_exp_t const *node)
+{
+	fr_assert(node != NULL);
+	while (node) {
+		switch (node->type) {
+		case XLAT_LITERAL:
+			INFO("literal --> %s", node->fmt);
+			break;
+
+		case XLAT_CHILD:
+			INFO("child --> %s", node->fmt);
+			INFO("{");
+			xlat_debug(node->child);
+			INFO("}");
+			break;
+
+		case XLAT_ONE_LETTER:
+			INFO("percent --> %c", node->fmt[0]);
+			break;
+
+		case XLAT_ATTRIBUTE:
+			fr_assert(tmpl_da(node->attr) != NULL);
+			INFO("attribute --> %s", tmpl_da(node->attr)->name);
+			fr_assert(node->child == NULL);
+			if (tmpl_num(node->attr) != NUM_ANY) {
+				INFO("{");
+				INFO("ref  %d", tmpl_request(node->attr));
+				INFO("list %d", tmpl_list(node->attr));
+				if (tmpl_num(node->attr) != NUM_ANY) {
+					if (tmpl_num(node->attr) == NUM_COUNT) {
+						INFO("[#]");
+					} else if (tmpl_num(node->attr) == NUM_ALL) {
+						INFO("[*]");
+					} else {
+						INFO("[%d]", tmpl_num(node->attr));
+					}
+				}
+				INFO("}");
+			}
+			break;
+
+		case XLAT_VIRTUAL:
+			fr_assert(node->fmt != NULL);
+			INFO("virtual --> %s", node->fmt);
+			break;
+
+		case XLAT_VIRTUAL_UNRESOLVED:
+			fr_assert(node->fmt != NULL);
+			INFO("virtual-unresolved --> %s", node->fmt);
+			break;
+
+		case XLAT_FUNC:
+			fr_assert(node->call.func != NULL);
+			INFO("xlat --> %s", node->call.func->name);
+			if (node->child) {
+				INFO("{");
+				xlat_debug(node->child);
+				INFO("}");
+			}
+			break;
+
+		case XLAT_FUNC_UNRESOLVED:
+			INFO("xlat-unresolved --> %s", node->fmt);
+			if (node->child) {
+				INFO("{");
+				xlat_debug(node->child);
+				INFO("}");
+			}
+			break;
+
+#ifdef HAVE_REGEX
+		case XLAT_REGEX:
+			INFO("regex-var --> %d", node->regex_index);
+			break;
+#endif
+
+		case XLAT_ALTERNATE:
+			DEBUG("XLAT-IF {");
+			xlat_debug(node->child);
+			DEBUG("}");
+			DEBUG("XLAT-ELSE {");
+			xlat_debug(node->alternate);
+			DEBUG("}");
+			break;
+
+		case XLAT_INVALID:
+			DEBUG("XLAT-INVALID");
+			break;
+		}
+		node = node->next;
+	}
+}
+
+/** Reconstitute an xlat expression from its constituent nodes
+ *
+ * @param[in] out	Where to write the output string.
+ * @param[in] head	First node to print.
+ *
+ */
+ssize_t xlat_print(fr_sbuff_t *out, xlat_exp_t const *head)
+{
+	ssize_t			slen;
+	size_t			at_in = fr_sbuff_used_total(out);
+	xlat_exp_t const	*node = head;
+
+	if (!node) return 0;
+
+	while (node) {
+		switch (node->type) {
+		case XLAT_CHILD:
+			FR_SBUFF_IN_CHAR_RETURN(out, '"');
+			xlat_print(out, node->child);
+			FR_SBUFF_IN_CHAR_RETURN(out, '"');
+			goto next;
+
+		case XLAT_LITERAL:
+			FR_SBUFF_IN_BSTRCPY_BUFFER_RETURN(out, node->fmt);
+			goto next;
+
+		case XLAT_ONE_LETTER:
+			FR_SBUFF_IN_CHAR_RETURN(out, '%', node->fmt[0]);
+			goto next;
+
+		default:
+			break;
+		}
+
+		FR_SBUFF_IN_STRCPY_LITERAL_RETURN(out, "%{");
+		switch (node->type) {
+		case XLAT_ATTRIBUTE:
+			slen = tmpl_print_attr_str(out, node->attr);
+			if (slen < 0) {
+			error:
+				return slen;
+			}
+			break;
+#ifdef HAVE_REGEX
+		case XLAT_REGEX:
+			FR_SBUFF_IN_SPRINTF_RETURN(out, "%i", node->regex_index);
+			break;
+#endif
+		case XLAT_VIRTUAL:
+			FR_SBUFF_IN_BSTRCPY_BUFFER_RETURN(out, node->call.func->name);
+			break;
+
+		case XLAT_VIRTUAL_UNRESOLVED:
+			FR_SBUFF_IN_BSTRCPY_BUFFER_RETURN(out, node->fmt);
+			break;
+
+		case XLAT_FUNC:
+			FR_SBUFF_IN_BSTRCPY_BUFFER_RETURN(out, node->call.func->name);
+			FR_SBUFF_IN_CHAR_RETURN(out, ':');
+
+			if (node->child) {
+				slen = xlat_print(out, node->child);
+				if (slen < 0) goto error;
+			}
+			break;
+
+		case XLAT_FUNC_UNRESOLVED:
+			FR_SBUFF_IN_BSTRCPY_BUFFER_RETURN(out, node->fmt);
+			FR_SBUFF_IN_CHAR_RETURN(out, ':');
+
+			if (node->child) {
+				slen = xlat_print(out, node->child);
+				if (slen < 0) goto error;
+			}
+			break;
+
+		case XLAT_ALTERNATE:
+			slen = xlat_print(out, node->child);
+			if (slen < 0) goto error;
+
+			FR_SBUFF_IN_STRCPY_LITERAL_RETURN(out, ":-");
+			slen = xlat_print(out, node->alternate);
+			if (slen < 0) goto error;
+			break;
+
+			fr_assert_fail(NULL);
+			break;
+
+		case XLAT_INVALID:
+		case XLAT_LITERAL:
+		case XLAT_ONE_LETTER:
+		case XLAT_CHILD:
+			fr_assert_fail(NULL);
+			break;
+		}
+		FR_SBUFF_IN_CHAR_RETURN(out, '}');
+	next:
+		node = node->next;
+	}
+
+	return fr_sbuff_used(out) - at_in;
+}
+
+/** Tokenize an xlat expansion at runtime
+ *
+ * This is used for runtime parsing of xlat expansions, such as those we receive from datastores
+ * like LDAP or SQL.
  *
  * @param[in] ctx	to allocate dynamic buffers in.
  * @param[out] head	the head of the xlat list / tree structure.
+ * @param[in,out] flags	that control evaluation and parsing.
+ * @param[in] request	the input request.  Memory will be attached here.
  * @param[in] in	the format string to expand.
+ * @param[in] p_rules	from the encompassing grammar.
  * @param[in] ar_rules	controlling how attribute references are parsed.
+ * @return
+ *	- >0 on success.
+ *	- 0 and *head == NULL - Parse failure on first char.
+ *	- 0 and *head != NULL - Zero length expansion
+ *	- <0 the negative offset of the parse failure.
+ */
+ssize_t xlat_tokenize_ephemeral(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, REQUEST *request,
+			        fr_sbuff_t *in,
+			        fr_sbuff_parse_rules_t const *p_rules, tmpl_rules_t const *ar_rules)
+{
+	fr_sbuff_t	our_in = FR_SBUFF_NO_ADVANCE(in);
+	xlat_flags_t	tmp_flags = {};
+
+	if (!flags) flags = &tmp_flags;
+
+	*head = NULL;
+
+	fr_strerror();	/* Clear error buffer */
+	if (xlat_tokenize_literal(request, head, flags,
+				  &our_in, false, p_rules, ar_rules) < 0) return -fr_sbuff_used(&our_in);
+
+	/*
+	 *	Zero length expansion, return a zero length node.
+	 */
+	if (fr_sbuff_used(&our_in) == 0) *head = xlat_exp_alloc(ctx, XLAT_LITERAL, "", 0);
+
+	if (RDEBUG_ENABLED3) {
+		INFO("%pV", fr_box_strvalue_len(fr_sbuff_start(&our_in), fr_sbuff_used(&our_in)));
+		INFO("Parsed xlat tree:");
+		xlat_debug(*head);
+	}
+
+	/*
+	 *	Create ephemeral instance data for the xlat
+	 */
+	if (xlat_instantiate_ephemeral(*head) < 0) {
+		fr_strerror_printf("Failed performing ephemeral instantiation for xlat");
+		TALLOC_FREE(*head);
+		return 0;
+	}
+
+	return fr_sbuff_set(in, &our_in);
+}
+
+/** Tokenize an xlat expansion into a series of XLAT_TYPE_CHILD arguments
+ *
+ * @param[in] ctx		to allocate nodes in.  Note: All nodes will be
+ *				allocated in the same ctx.  This is to allow
+ *				manipulation by xlat instantiation functions
+ *				later.
+ * @param[out] head		the head of the xlat list / tree structure.
+ * @param[out] flags		Populated with parameters that control xlat
+ *				evaluation and multi-pass parsing.
+ * @param[in] in		the format string to expand.
+ * @param[in] ar_rules		controlling how attribute references are parsed.
  * @return
  *	- <=0 on error.
  *	- >0  on success which is the number of characters parsed.
  */
-ssize_t xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in,
+ssize_t xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, fr_sbuff_t *in,
 			   fr_sbuff_parse_rules_t const *p_rules, tmpl_rules_t const *ar_rules)
 {
 	fr_sbuff_t			our_in = FR_SBUFF_NO_ADVANCE(in);
 	ssize_t				slen;
-	TALLOC_CTX			*our_ctx = ctx;
 	fr_cursor_t			cursor;
 	fr_sbuff_marker_t		m;
 	fr_sbuff_parse_rules_t const	*our_p_rules;	/* Bareword parse rules */
+	xlat_flags_t			tmp_flags = {};
+
+	if (!flags) flags = &tmp_flags;
 
 	*head = NULL;
 
@@ -860,7 +1151,7 @@ ssize_t xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in,
 		 *	Alloc a new node to hold the child nodes
 		 *	that make up the argument.
 		 */
-		node = xlat_exp_alloc_null(our_ctx);
+		node = xlat_exp_alloc_null(ctx);
 		xlat_exp_set_type(node, XLAT_CHILD);
 
 		switch (type) {
@@ -868,24 +1159,28 @@ ssize_t xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in,
 		 *	Barewords --may-contain=%{expansions}
 		 */
 		case T_BARE_WORD:
-			if (xlat_tokenize_literal(node, &node->child, &our_in,
+			if (xlat_tokenize_literal(node, &node->child, &node->flags, &our_in,
 						  false, our_p_rules, ar_rules) < 0) {
 			error:
 				if (our_p_rules != &tmpl_parse_rules_bareword_quoted) {
 					talloc_const_free(our_p_rules->terminals);
 				}
 				talloc_free(node);
+				fr_cursor_head(&cursor);
 				fr_cursor_free_list(&cursor);
+
 				return -fr_sbuff_used(&our_in);	/* error */
 			}
+			xlat_flags_merge(flags, &node->flags);
 			break;
 
 		/*
 		 *	"Double quoted strings may contain %{expansions}"
 		 */
 		case T_DOUBLE_QUOTED_STRING:
-			if (xlat_tokenize_literal(node, &node->child, &our_in,
+			if (xlat_tokenize_literal(node, &node->child, &node->flags, &our_in,
 						  false, &tmpl_parse_rules_double_quoted, ar_rules) < 0) goto error;
+			xlat_flags_merge(flags, &node->flags);
 			break;
 
 		/*
@@ -897,12 +1192,14 @@ ssize_t xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in,
 
 			node->child = xlat_exp_alloc_null(node);
 			xlat_exp_set_type(node->child, XLAT_LITERAL);
+			node->flags.needs_async = false;	/* Literals are always needs_async */
 
 			slen = fr_sbuff_out_aunescape_until(node->child, &str, &our_in, SIZE_MAX,
 							    tmpl_parse_rules_single_quoted.terminals,
 							    tmpl_parse_rules_single_quoted.escapes);
 			if (slen < 0) goto error;
 			xlat_exp_set_name_buffer_shallow(node->child, str);
+			xlat_flags_merge(flags, &node->flags);
 		}
 			break;
 
@@ -926,11 +1223,9 @@ ssize_t xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in,
 
 		fmt = talloc_bstrndup(node, fr_sbuff_current(&m), fr_sbuff_behind(&m));
 		xlat_exp_set_name_buffer_shallow(node, fmt);
-		node->quote = type;
-		node->async_safe = node->child->async_safe;
 
+		xlat_flags_merge(flags, &node->flags);
 		fr_cursor_insert(&cursor, node);
-		our_ctx = node;
 		node = NULL;
 
 		/*
@@ -957,217 +1252,7 @@ ssize_t xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in,
 		}
 	}
 
-	if (our_p_rules != &tmpl_parse_rules_bareword_quoted) {
-		talloc_const_free(our_p_rules->terminals);
-	}
-
-	return fr_sbuff_set(in, &our_in);
-}
-
-static void xlat_tokenize_debug(REQUEST *request, xlat_exp_t const *node)
-{
-	fr_assert(node != NULL);
-
-	RINDENT();
-	while (node) {
-		switch (node->type) {
-		case XLAT_LITERAL:
-			RDEBUG3("literal --> %s", node->fmt);
-			break;
-
-		case XLAT_CHILD:
-			RDEBUG3("child --> %s", node->fmt);
-			RDEBUG3("{");
-			RINDENT();
-			xlat_tokenize_debug(request, node->child);
-			REXDENT();
-			RDEBUG3("}");
-			break;
-
-		case XLAT_ONE_LETTER:
-			RDEBUG3("percent --> %c", node->fmt[0]);
-			break;
-
-		case XLAT_ATTRIBUTE:
-			fr_assert(tmpl_da(node->attr) != NULL);
-			RDEBUG3("attribute --> %s", tmpl_da(node->attr)->name);
-			fr_assert(node->child == NULL);
-			if (tmpl_num(node->attr) != NUM_ANY) {
-				RDEBUG3("{");
-
-				RINDENT();
-				RDEBUG3("ref  %d", tmpl_request(node->attr));
-				RDEBUG3("list %d", tmpl_list(node->attr));
-				if (tmpl_num(node->attr) != NUM_ANY) {
-					if (tmpl_num(node->attr) == NUM_COUNT) {
-						RDEBUG3("[#]");
-					} else if (tmpl_num(node->attr) == NUM_ALL) {
-						RDEBUG3("[*]");
-					} else {
-						RDEBUG3("[%d]", tmpl_num(node->attr));
-					}
-				}
-				REXDENT();
-				RDEBUG3("}");
-			}
-			break;
-
-		case XLAT_VIRTUAL:
-			fr_assert(node->fmt != NULL);
-			RDEBUG3("virtual --> %s", node->fmt);
-			break;
-
-		case XLAT_FUNC:
-			fr_assert(node->xlat != NULL);
-			RDEBUG3("xlat --> %s", node->xlat->name);
-			if (node->child) {
-				RDEBUG3("{");
-				xlat_tokenize_debug(request, node->child);
-				RDEBUG3("}");
-			}
-			break;
-
-#ifdef HAVE_REGEX
-		case XLAT_REGEX:
-			RDEBUG3("regex-var --> %d", node->regex_index);
-			break;
-#endif
-
-		case XLAT_ALTERNATE:
-			DEBUG("XLAT-IF {");
-			xlat_tokenize_debug(request, node->child);
-			DEBUG("}");
-			DEBUG("XLAT-ELSE {");
-			xlat_tokenize_debug(request, node->alternate);
-			DEBUG("}");
-			break;
-		}
-		node = node->next;
-	}
-	REXDENT();
-}
-
-ssize_t xlat_print(fr_sbuff_t *out, xlat_exp_t const *node)
-{
-	ssize_t			slen;
-	size_t			at_in = fr_sbuff_used_total(out);
-
-	if (!node) return 0;
-
-	while (node) {
-		switch (node->type) {
-		case XLAT_LITERAL:
-		case XLAT_CHILD:
-			FR_SBUFF_IN_BSTRCPY_BUFFER_RETURN(out, node->fmt);
-			goto next;
-
-		case XLAT_ONE_LETTER:
-			FR_SBUFF_IN_CHAR_RETURN(out, '%', node->fmt[0]);
-			goto next;
-
-		default:
-			break;
-		}
-
-		FR_SBUFF_IN_STRCPY_LITERAL_RETURN(out, "%{");
-		switch (node->type) {
-		case XLAT_ATTRIBUTE:
-			slen = tmpl_print_attr_str(out, node->attr);
-			if (slen < 0) {
-			error:
-				return slen;
-			}
-			break;
-#ifdef HAVE_REGEX
-		case XLAT_REGEX:
-			FR_SBUFF_IN_SPRINTF_RETURN(out, "%i", node->regex_index);
-			break;
-#endif
-		case XLAT_VIRTUAL:
-			FR_SBUFF_IN_BSTRCPY_BUFFER_RETURN(out, node->fmt);
-			break;
-
-		case XLAT_FUNC:
-			FR_SBUFF_IN_BSTRCPY_BUFFER_RETURN(out, node->xlat->name);
-			FR_SBUFF_IN_CHAR_RETURN(out, ':');
-
-			if (node->child) {
-				slen = xlat_print(out, node->child);
-				if (slen < 0) goto error;
-			}
-			break;
-
-		case XLAT_ALTERNATE:
-			slen = xlat_print(out, node->child);
-			if (slen < 0) goto error;
-
-			FR_SBUFF_IN_STRCPY_LITERAL_RETURN(out, ":-");
-			slen = xlat_print(out, node->alternate);
-			if (slen < 0) goto error;
-			break;
-
-		default:
-			fr_assert_fail(NULL);
-			break;
-		}
-		FR_SBUFF_IN_CHAR_RETURN(out, '}');
-	next:
-		node = node->next;
-	}
-
-	return fr_sbuff_used(out) - at_in;
-}
-
-/** Tokenize an xlat expansion at runtime
- *
- * This is used for runtime parsing of xlat expansions, such as those we receive from datastores
- * like LDAP or SQL.
- *
- * @param[in] ctx	to allocate dynamic buffers in.
- * @param[out] head	the head of the xlat list / tree structure.
- * @param[in] request	the input request.  Memory will be attached here.
- * @param[in] in	the format string to expand.
- * @param[in] p_rules	from the encompassing grammar.
- * @param[in] ar_rules	controlling how attribute references are parsed.
- * @return
- *	- >0 on success.
- *	- 0 and *head == NULL - Parse failure on first char.
- *	- 0 and *head != NULL - Zero length expansion
- *	- <0 the negative offset of the parse failure.
- */
-ssize_t xlat_tokenize_ephemeral(TALLOC_CTX *ctx, xlat_exp_t **head, REQUEST *request,
-			        fr_sbuff_t *in,
-			        fr_sbuff_parse_rules_t const *p_rules, tmpl_rules_t const *ar_rules)
-{
-	fr_sbuff_t	our_in = FR_SBUFF_NO_ADVANCE(in);
-
-	*head = NULL;
-
-	fr_strerror();	/* Clear error buffer */
-	if (xlat_tokenize_literal(request, head, &our_in, false, p_rules, ar_rules) < 0) return -fr_sbuff_used(&our_in);
-
-	/*
-	 *	Zero length expansion, return a zero length node.
-	 */
-	if (fr_sbuff_used(&our_in) == 0) {
-		MEM(*head = talloc_zero(ctx, xlat_exp_t));
-		(*head)->async_safe = true;
-	}
-
-	if (RDEBUG_ENABLED3) {
-		RDEBUG3("%pV", fr_box_strvalue_len(fr_sbuff_start(&our_in), fr_sbuff_used(&our_in)));
-		RDEBUG3("Parsed xlat tree:");
-		xlat_tokenize_debug(request, *head);
-	}
-
-	/*
-	 *	Create ephemeral instance data for the xlat
-	 */
-	if (xlat_instantiate_ephemeral(*head) < 0) {
-		fr_strerror_printf("Failed performing ephemeral instantiation for xlat");
-		TALLOC_FREE(*head);
-		return 0;
-	}
+	if (our_p_rules != &tmpl_parse_rules_bareword_quoted) talloc_const_free(our_p_rules->terminals);
 
 	return fr_sbuff_set(in, &our_in);
 }
@@ -1176,6 +1261,7 @@ ssize_t xlat_tokenize_ephemeral(TALLOC_CTX *ctx, xlat_exp_t **head, REQUEST *req
  *
  * @param[in] ctx	to allocate dynamic buffers in.
  * @param[out] head	the head of the xlat list / tree structure.
+ * @param[in,out] flags	that control evaluation and parsing.
  * @param[in] in	the format string to expand.
  * @param[in] p_rules	controlling how the string containing the xlat
  *			expansions should be parsed.
@@ -1186,16 +1272,19 @@ ssize_t xlat_tokenize_ephemeral(TALLOC_CTX *ctx, xlat_exp_t **head, REQUEST *req
  *	- 0 and *head != NULL - Zero length expansion
  *	- < 0 the negative offset of the parse failure.
  */
-ssize_t xlat_tokenize(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_t *in,
+ssize_t xlat_tokenize(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, fr_sbuff_t *in,
 		      fr_sbuff_parse_rules_t const *p_rules, tmpl_rules_t const *ar_rules)
 {
 	fr_sbuff_t	our_in = FR_SBUFF_NO_ADVANCE(in);
+	xlat_flags_t	tmp_flags = {};
 
+	if (!flags) flags = &tmp_flags;
 	*head = NULL;
 
 	fr_strerror();	/* Clear error buffer */
 
-	if (xlat_tokenize_literal(ctx, head, &our_in, false, p_rules, ar_rules) < 0) return -fr_sbuff_used(&our_in);
+	if (xlat_tokenize_literal(ctx, head, flags,
+				  &our_in, false, p_rules, ar_rules) < 0) return -fr_sbuff_used(&our_in);
 
 	/*
 	 *	Add nodes that need to be bootstrapped to
@@ -1250,3 +1339,239 @@ bool xlat_to_literal(TALLOC_CTX *ctx, char **str, xlat_exp_t **head)
 	return true;
 }
 
+/** Walk over an xlat tree recursively, resolving any unresolved functions or references
+ *
+ * @param[in,out] head		of xlat tree to resolve.
+ * @param[in,out] flags		that control evaluation and parsing.
+ * @param[in] allow_unresolved	Don't error out if we can't resolve a function or attribute.
+ * @return
+ *	- 0 on success.
+ *	- -1 on failure.
+ */
+int xlat_resolve(xlat_exp_t **head, xlat_flags_t *flags, bool allow_unresolved)
+{
+	xlat_exp_t	*node;
+	xlat_flags_t	our_flags;
+
+	if (!flags->needs_resolving) return 0;			/* Already done */
+
+	our_flags = *flags;
+	our_flags.needs_resolving = false;			/* We flip this if not all resolutions are successful */
+
+	for (node = *head; node; node = node->next) {
+		if (!node->flags.needs_resolving) continue;	/* This node and non of its children need resolving */
+
+		switch (node->type) {
+		case XLAT_CHILD:
+			return xlat_resolve(&node->child, &node->flags, allow_unresolved);
+
+		/*
+		 *	Alternate expansion a || b
+		 *
+		 *	Do resolution for a OR b
+		 */
+		case XLAT_ALTERNATE:
+		{
+			xlat_flags_t	child_flags = node->flags, alt_flags = node->flags;
+
+			if ((xlat_resolve(&node->child, &child_flags, allow_unresolved) < 0) ||
+			    (xlat_resolve(&node->alternate, &alt_flags, allow_unresolved) < 0)) return -1;
+
+			xlat_flags_merge(&child_flags, &alt_flags);
+			node->flags = child_flags;
+		}
+			return 0;
+
+		/*
+		 *	An unresolved function.
+		 */
+		case XLAT_FUNC_UNRESOLVED:
+		{
+			xlat_t *func;
+
+			func = xlat_func_find(node->fmt, talloc_array_length(node->fmt) - 1);
+			if (!func) {
+				/*
+				 *	FIXME - Produce proper error with marker
+				 */
+				if (!allow_unresolved) {
+					fr_strerror_printf("Failed resolving function \"%pV\"",
+							   fr_box_strvalue_buffer(node->fmt));
+					return -1;
+				}
+				our_flags.needs_resolving = true;	/* Still unresolved nodes */
+				break;
+			}
+
+			xlat_exp_set_type(node, XLAT_FUNC);
+			node->call.func = func;
+
+			/*
+			 *	Reset node flags
+			 */
+			node->flags = (xlat_flags_t){ .needs_async = func->needs_async };
+
+			/*
+			 *	Add the freshly resolved function
+			 *	to the bootstrap tree.
+			 */
+			if (xlat_bootstrap_func(node) < 0) return -1;
+
+		}
+			break;
+		/*
+		 *	This covers unresolved attributes as well as
+		 *	unresolved functions.
+		 */
+		case XLAT_VIRTUAL_UNRESOLVED:
+		{
+			xlat_t *func;
+
+			fr_assert(node->attr->type == TMPL_TYPE_ATTR_UNRESOLVED);
+
+			func = xlat_func_find(tmpl_attr_unresolved(node->attr), -1);
+			if (func) {
+				xlat_exp_set_type(node, XLAT_VIRTUAL);
+				node->attr = node->attr;	/* Shift to the right location */
+				node->call.func = func;
+
+				/*
+				 *	Reset node flags
+				 */
+				node->flags = (xlat_flags_t){ .needs_async = func->needs_async };
+				break;
+			}
+
+			/*
+			 *	Try and resolve (in-place) as an attribute
+			 */
+			if ((tmpl_resolve(node->attr) < 0) || (node->attr->type != TMPL_TYPE_ATTR)) {
+				/*
+				 *	FIXME - Produce proper error with marker
+				 */
+				if (!allow_unresolved) {
+					fr_strerror_printf_push("Failed resolving attribute in expansion %%{%s}",
+								node->fmt);
+					return -1;
+				}
+				our_flags.needs_resolving = true;	/* Still unresolved nodes */
+				break;
+			}
+
+			/*
+			 *	Just need to flip the type as the tmpl
+			 *	should already have been fixed up
+			 */
+			xlat_exp_set_type(node, XLAT_ATTRIBUTE);
+
+			/*
+			 *	Reset node flags
+			 */
+			node->flags = (xlat_flags_t){ };
+		}
+			break;
+
+		default:
+			fr_assert(0);	/* Should not have been marked as unresolved */
+			return -1;
+		}
+
+		xlat_flags_merge(&our_flags, &node->flags);
+	}
+
+	xlat_flags_merge(flags, &our_flags);	/* Update parent flags */
+
+	return 0;
+}
+
+
+/** Try to convert an xlat to a tmpl for efficiency
+ *
+ * @param ctx to allocate new tmpl_t in.
+ * @param node to convert.
+ * @return
+ *	- NULL if unable to convert (not necessarily error).
+ *	- A new #tmpl_t.
+ */
+tmpl_t *xlat_to_tmpl_attr(TALLOC_CTX *ctx, xlat_exp_t *node)
+{
+	tmpl_t *vpt;
+
+	if (node->next || (node->type != XLAT_ATTRIBUTE) || !tmpl_is_attr(node->attr)) return NULL;
+
+	/*
+	 *   Concat means something completely different as an attribute reference
+	 *   Count isn't implemented.
+	 */
+	if ((tmpl_num(node->attr) == NUM_COUNT) || (tmpl_num(node->attr) == NUM_ALL)) return NULL;
+
+	vpt = tmpl_alloc(ctx, TMPL_TYPE_ATTR, T_BARE_WORD, node->fmt, talloc_array_length(node->fmt) - 1);
+	if (!vpt) return NULL;
+
+	tmpl_attr_copy(vpt, node->attr);
+
+	TMPL_VERIFY(vpt);
+
+	return vpt;
+}
+
+/** Convert attr tmpl to an xlat for &attr[*]
+ *
+ * @param[in] ctx	to allocate new expansion in.
+ * @param[out] head	Where to write new xlat node.
+ * @param[out] flags	Where to write xlat resolution flags.
+ * @param[in,out] vpt_p	to convert to xlat expansion.
+ *			Will be set to NULL on completion
+ * @return
+ *	- 0 on success.
+ *	- -1 on failure.
+ */
+int xlat_from_tmpl_attr(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, tmpl_t **vpt_p)
+{
+	xlat_exp_t	*node;
+	xlat_t		*func;
+	tmpl_t		*vpt = *vpt_p;
+
+	if (!tmpl_is_attr(vpt) || !tmpl_is_attr_unresolved(vpt)) return 0;
+
+	/*
+	 *	If it's a single attribute reference
+	 *	see if it's actually a virtual attribute.
+	 */
+	if (tmpl_attr_ref_count(vpt) == 1) {
+		if (tmpl_is_attr(vpt) && tmpl_da(vpt)->flags.virtual) {
+			func = xlat_func_find(tmpl_attr_unresolved(vpt), -1);
+			if (!func) {
+			unresolved:
+				node = xlat_exp_alloc(ctx, XLAT_VIRTUAL_UNRESOLVED, vpt->name, vpt->len);
+
+				/*
+				 *	FIXME - Need a tmpl_copy function to
+				 *	the assignment of the tmpl to the new
+				 *	xlat expression
+				 */
+				node->attr = talloc_move(node, vpt_p);
+				node->flags = (xlat_flags_t) { .needs_resolving = true };
+				*head = node;
+				xlat_flags_merge(flags, &node->flags);
+				return 0;
+			}
+
+		virtual:
+			node = xlat_exp_alloc(ctx, XLAT_VIRTUAL, vpt->name, vpt->len);
+			node->attr = talloc_move(node, vpt_p);
+			node->call.func = func;
+			*head = node;
+			node->flags = (xlat_flags_t) { .needs_async = func->needs_async };
+		} else if (tmpl_is_attr_unresolved(vpt)) {
+			func = xlat_func_find(tmpl_da(vpt)->name, -1);
+			if (!func) goto unresolved;
+			goto virtual;
+		}
+	}
+
+	node = xlat_exp_alloc(ctx, XLAT_ATTRIBUTE, vpt->name, vpt->len);
+	node->attr = talloc_move(node, vpt_p);
+
+	return 0;
+}

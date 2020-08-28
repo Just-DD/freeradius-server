@@ -322,7 +322,6 @@ fr_sbuff_unescape_rules_t fr_value_unescape_solidus = {
 	.subs = {
 		['%'] = '%',	/* xlat expansions */
 		['/'] = '/',	/* Quoting char */
-		['\\'] = '\\',
 		['a'] = '\a',
 		['b'] = '\b',
 		['e'] = '\\',
@@ -331,9 +330,9 @@ fr_sbuff_unescape_rules_t fr_value_unescape_solidus = {
 		['t'] = '\t',
 		['v'] = '\v'
 	},
-//	.skip = {
-//		['\\'] = '\\'	/* Leave this for the regex library */
-//	},
+	.skip = {
+		['\\'] = '\\'	/* Leave this for the regex library */
+	},
 	.do_hex = true,
 	.do_oct = true
 };

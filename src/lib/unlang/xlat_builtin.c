@@ -307,7 +307,7 @@ int xlat_register_legacy(void *mod_inst, char const *name,
 	c->mod_inst = mod_inst;
 	c->instantiate = instantiate;
 	c->inst_size = inst_size;
-	c->async_safe = true;
+	c->needs_async = true;
 
 	DEBUG3("%s: %s", __FUNCTION__, c->name);
 
@@ -353,7 +353,7 @@ xlat_t const *xlat_register(TALLOC_CTX *ctx, char const *name, xlat_func_t func,
 			return NULL;
 		}
 
-		if ((c->type != XLAT_FUNC_NORMAL) || c->async_safe) {
+		if ((c->type != XLAT_FUNC_NORMAL) || (c->needs_async != needs_async)) {
 			ERROR("%s: Cannot change async capability of %s", __FUNCTION__, name);
 			return NULL;
 		}
@@ -375,7 +375,7 @@ xlat_t const *xlat_register(TALLOC_CTX *ctx, char const *name, xlat_func_t func,
 
 	c->func.async = func;
 	c->type = XLAT_FUNC_NORMAL;
-	c->async_safe = !needs_async;	/* this function may yield */
+	c->needs_async = needs_async;	/* this function may yield */
 
 	DEBUG3("%s: %s", __FUNCTION__, c->name);
 
@@ -411,7 +411,7 @@ int xlat_internal(char const *name)
 
 /** Set global instantiation/detach callbacks
  *
- * All functions registered must be async_safe.
+ * All functions registered must be needs_async.
  *
  * @param[in] xlat		to set instantiation callbacks for.
  * @param[in] instantiate	Instantiation function. Called whenever a xlat is
@@ -442,7 +442,7 @@ void _xlat_async_instantiate_set(xlat_t const *xlat,
 
 /** Register an async xlat
  *
- * All functions registered must be async_safe.
+ * All functions registered must be needs_async.
  *
  * @param[in] xlat			to set instantiation callbacks for.
  * @param[in] thread_instantiate	Instantiation function. Called for every compiled xlat
@@ -516,7 +516,7 @@ void xlat_unregister_module(void *instance)
  *	Internal redundant handler for xlats
  */
 typedef enum xlat_redundant_type_t {
-	XLAT_INVALID = 0,
+	XLAT_REDUNDANT_INVALID = 0,
 	XLAT_REDUNDANT,
 	XLAT_LOAD_BALANCE,
 	XLAT_REDUNDANT_LOAD_BALANCE,
@@ -1360,7 +1360,7 @@ static ssize_t xlat_func_map(UNUSED TALLOC_CTX *ctx, char **out, size_t outlen,
 	switch (map->lhs->type) {
 	case TMPL_TYPE_ATTR:
 	case TMPL_TYPE_LIST:
-	case TMPL_TYPE_XLAT_UNRESOLVED:
+	case TMPL_TYPE_XLAT:
 		break;
 
 	default:
@@ -1374,9 +1374,9 @@ static ssize_t xlat_func_map(UNUSED TALLOC_CTX *ctx, char **out, size_t outlen,
 	case TMPL_TYPE_EXEC:
 	case TMPL_TYPE_DATA:
 	case TMPL_TYPE_LIST:
-	case TMPL_TYPE_REGEX_UNRESOLVED:
+	case TMPL_TYPE_REGEX_XLAT_UNRESOLVED:
 	case TMPL_TYPE_UNRESOLVED:
-	case TMPL_TYPE_XLAT_UNRESOLVED:
+	case TMPL_TYPE_XLAT:
 		break;
 
 	default:
