@@ -1245,7 +1245,7 @@ static inline bool CC_HINT(always_inline) tmpl_substr_terminal_check(fr_sbuff_t 
 	fr_sbuff_marker_t	m;
 	bool			ret;
 
-	if (FR_SBUFF_CANT_EXTEND(in)) return true;		/* we're at the end of the string */
+	if (!fr_sbuff_extend(in)) return true;		/* we're at the end of the string */
 	if (!p_rules || !p_rules->terminals) return false;	/* more stuff to parse but don't have a terminal set */
 
 	fr_sbuff_marker(&m, in);
@@ -1367,7 +1367,7 @@ static inline int tmpl_attr_ref_afrom_attr_unresolved_substr(TALLOC_CTX *ctx, at
 	/*
 	 *	Input too short
 	 */
-	if (FR_SBUFF_CANT_EXTEND(name)) {
+	if (!fr_sbuff_extend(name)) {
 		fr_strerror_printf("Missing attribute reference");
 		if (err) *err = ATTR_REF_ERROR_INVALID_ATTRIBUTE_NAME;
 		return -1;
@@ -1479,7 +1479,7 @@ static inline int tmpl_attr_ref_afrom_attr_substr(TALLOC_CTX *ctx, attr_ref_erro
 	/*
 	 *	Input too short
 	 */
-	if (FR_SBUFF_CANT_EXTEND(name)) {
+	if (!fr_sbuff_extend(name)) {
 		fr_strerror_printf("Missing attribute reference");
 		if (err) *err = ATTR_REF_ERROR_INVALID_ATTRIBUTE_NAME;
 		goto error;
@@ -1877,7 +1877,7 @@ ssize_t tmpl_afrom_attr_substr(TALLOC_CTX *ctx, attr_ref_error_t *err,
 
 	if (err) *err = ATTR_REF_ERROR_NONE;
 
-	if (FR_SBUFF_CANT_EXTEND(&our_name)) {
+	if (!fr_sbuff_extend(&our_name)) {
 		fr_strerror_printf("Empty attribute reference");
 		if (err) *err = ATTR_REF_ERROR_EMPTY;
 		FR_SBUFF_ERROR_RETURN(&our_name);
@@ -3436,7 +3436,7 @@ ssize_t tmpl_print(fr_sbuff_t *out, tmpl_t const *vpt)
 		FR_SBUFF_IN_CHAR_RETURN(&our_out, '/');
 		FR_SBUFF_IN_SNPRINT_RETURN(&our_out, vpt->name, vpt->len, '/');
 		FR_SBUFF_IN_CHAR_RETURN(&our_out, '/');
-		FR_SBUFF_EXTEND_OR_RETURN(&our_out, REGEX_FLAG_BUFF_SIZE - 1);
+		FR_SBUFF_EXTEND_LOWAT_OR_RETURN(&our_out, REGEX_FLAG_BUFF_SIZE - 1);
 		fr_sbuff_advance(&our_out,
 				 regex_flags_snprint(fr_sbuff_current(&our_out), fr_sbuff_remaining(&our_out) + 1,
 				 		     tmpl_regex_flags(vpt)));

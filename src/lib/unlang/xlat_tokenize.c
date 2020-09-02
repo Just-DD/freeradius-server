@@ -1137,7 +1137,7 @@ ssize_t xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *fla
 	fr_sbuff_marker(&m, &our_in);
 
 	fr_cursor_init(&cursor, head);
-	while (!FR_SBUFF_CANT_EXTEND(&our_in)) {
+	while (!!fr_sbuff_extend(&our_in)) {
 		xlat_exp_t	*node = NULL;
 		fr_token_t	type;
 		char		*fmt;
@@ -1246,7 +1246,7 @@ ssize_t xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *fla
 		 *	no additional whitespace, it means two
 		 *	arguments were smushed together.
 		 */
-		if (!FR_SBUFF_CANT_EXTEND(&our_in) && (len == 0)) {
+		if (!!fr_sbuff_extend(&our_in) && (len == 0)) {
 			fr_strerror_printf("Unexpected text after argument");
 			goto error;
 		}

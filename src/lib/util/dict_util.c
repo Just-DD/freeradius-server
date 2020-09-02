@@ -1331,7 +1331,7 @@ ssize_t dict_by_protocol_substr(fr_dict_attr_err_t *err,
 	char			buffer[FR_DICT_ATTR_MAX_NAME_LEN + 1 + 1];	/* +1 \0 +1 for "too long" */
 	fr_sbuff_t		our_name = FR_SBUFF_NO_ADVANCE(name);
 
-	if (!dict_gctx || !name || FR_SBUFF_CANT_EXTEND(name) || !out) return 0;
+	if (!dict_gctx || !name || !out) return 0;
 
 	memset(&root, 0, sizeof(root));
 

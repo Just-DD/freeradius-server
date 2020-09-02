@@ -1298,7 +1298,7 @@ static ssize_t cond_tokenize(TALLOC_CTX *ctx, fr_cond_t **out,
 	MEM(c = talloc_zero(ctx, fr_cond_t));
 
 	fr_sbuff_adv_past_whitespace(&our_in, SIZE_MAX);
-	if (FR_SBUFF_CANT_EXTEND(&our_in)) {
+	if (!fr_sbuff_extend(&our_in)) {
 		fr_strerror_printf("Empty condition is invalid");
 	error:
 		talloc_free(c);
@@ -1400,7 +1400,7 @@ static ssize_t cond_tokenize(TALLOC_CTX *ctx, fr_cond_t **out,
 	/*
 	 *	FOO - Existence check
 	 */
-	} else if (FR_SBUFF_CANT_EXTEND(&our_in)) {
+	} else if (!fr_sbuff_extend(&our_in)) {
 		if (brace) {
 			fr_strerror_printf("Missing closing brace");
 			goto error;
@@ -1475,7 +1475,7 @@ static ssize_t cond_tokenize(TALLOC_CTX *ctx, fr_cond_t **out,
 			break;
 		}
 
-		if (FR_SBUFF_CANT_EXTEND(&our_in)) {
+		if (!fr_sbuff_extend(&our_in)) {
 			fr_strerror_printf("Expected text after operator");
 			goto error;
 		}
@@ -1577,7 +1577,7 @@ closing_brace:
 	 *	End of string is allowed, unless we're still looking
 	 *	for closing braces.
 	 */
-	if (FR_SBUFF_CANT_EXTEND(&our_in)) {
+	if (!fr_sbuff_extend(&our_in)) {
 		if (brace) {
 			fr_strerror_printf("Missing closing brace");
 			goto error;

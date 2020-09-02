@@ -1244,7 +1244,7 @@ ssize_t regex_flags_parse(int *err, fr_regex_flags_t *out, fr_sbuff_t *in,
 
 	if (err) *err = 0;
 
-	while (!FR_SBUFF_CANT_EXTEND(&our_in)) {
+	while (fr_sbuff_extend(&our_in)) {
 		switch (*our_in.p) {
 #define DO_REGEX_FLAG(_f, _c) \
 		case _c: \
