@@ -1285,20 +1285,12 @@ ssize_t regex_flags_parse(int *err, fr_regex_flags_t *out, fr_sbuff_t *in,
  *	- The number of bytes written to the out buffer.
  *	- A number >= outlen if truncation has occurred.
  */
-size_t regex_flags_snprint(char *out, size_t outlen, fr_regex_flags_t const flags[static REGEX_FLAG_BUFF_SIZE])
+ssize_t regex_flags_print(fr_sbuff_t *sbuff, fr_regex_flags_t const flags[static REGEX_FLAG_BUFF_SIZE])
 {
-	char *p = out, *end = p + outlen;
+	fr_sbuff_t our_sbuff = FR_SBUFF_NO_ADVANCE(sbuff);
 
 #define DO_REGEX_FLAG(_f, _c) \
-	do { \
-		if (flags->_f) { \
-			if ((end - p) <= 1) { \
-				*end = '\0'; \
-				return outlen + 1; \
-			} \
-			*p++ = _c; \
-		} \
-	} while(0)
+	if (flags->_f) FR_SBUFF_IN_CHAR_RETURN(&our_sbuff, _c)
 
 	DO_REGEX_FLAG(global, 'g');
 	DO_REGEX_FLAG(ignore_case, 'i');
@@ -1308,6 +1300,6 @@ size_t regex_flags_snprint(char *out, size_t outlen, fr_regex_flags_t const flag
 	DO_REGEX_FLAG(extended, 'x');
 #undef DO_REGEX_FLAG
 
-	return p - out;
+	return fr_sbuff_set(sbuff, &our_sbuff);
 }
 #endif

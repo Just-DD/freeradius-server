@@ -170,8 +170,9 @@ typedef struct {
 
 ssize_t		regex_flags_parse(int *err, fr_regex_flags_t *out, fr_sbuff_t *in,
 				  fr_sbuff_term_t const *terminals, bool err_on_dup);
-size_t		regex_flags_snprint(char *out, size_t outlen,
-				    fr_regex_flags_t const flags[static REGEX_FLAG_BUFF_SIZE]);
+
+size_t		regex_flags_print(fr_sbuff_t *sbuff, fr_regex_flags_t const flags[static REGEX_FLAG_BUFF_SIZE]);
+
 ssize_t		regex_compile(TALLOC_CTX *ctx, regex_t **out, char const *pattern, size_t len,
 			      fr_regex_flags_t const *flags, bool subcaptures, bool runtime);
 int		regex_exec(regex_t *preg, char const *subject, size_t len, fr_regmatch_t *regmatch);
