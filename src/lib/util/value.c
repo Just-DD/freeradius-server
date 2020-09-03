@@ -4940,7 +4940,7 @@ finish:
 	dst->tainted = tainted;
 
 	/*
-	 *	Fixup enumv
+	 *	Fixup enumvs
 	 */
 	dst->enumv = dst_enumv;
 	dst->next = NULL;
@@ -4948,12 +4948,21 @@ finish:
 	return 0;
 }
 
-/** Print one attribute value to a string
+/** Print one boxed value to a string
  *
+ * This function should primarily when the #fr_value_box_t being serialized
+ * in some non-standard way, i.e. as a value for a field in a database.
+ *
+ * @param[in] out	Where to write the printed string.
+ * @param[in] data	Value box to print.
+ * @param[in] e_rules	To apply to FR_TYPE_STRING types.
+ *			Is not currently applied to any other box type.
  */
-char *fr_value_box_asprint(TALLOC_CTX *ctx, fr_value_box_t const *data, char quote)
+ssize_t fr_value_box_print(fr_sbuff_t *out, fr_value_box_t const *data, fr_sbuff_escape_rules_t const *e_rules)
 {
-	char *p = NULL;
+	fr_sbuff_t	our_out = FR_SBUFF_NO_ADVANCE(out);
+	char		*p = NULL;
+	char		buf[1024];	/* Interim buffer to use with poorly behaved printing functions */
 
 	if (!fr_cond_assert(data->type != FR_TYPE_INVALID)) return NULL;
 
@@ -4965,47 +4974,21 @@ char *fr_value_box_asprint(TALLOC_CTX *ctx, fr_value_box_t const *data, char quo
 		fr_dict_enum_t const	*dv;
 
 		dv = fr_dict_enum_by_value(data->enumv, data);
-		if (dv) return talloc_typed_strdup(ctx, dv->name);
+		if (dv) {
+			FR_SBUFF_IN_ESCAPE_BUFFER_RETURN(&our_out, dv->name, NULL);
+			goto done;
+		}
 	}
 
 	switch (data->type) {
 	case FR_TYPE_STRING:
-	{
-		size_t len, ret;
-
-		if (!quote) {
-			p = talloc_bstrndup(ctx, data->vb_strvalue, data->datum.length);
-			if (!p) return NULL;
-			talloc_set_type(p, char);
-			return p;
-		}
-
-		/* Gets us the size of the buffer we need to alloc */
-		len = fr_snprint_len(data->vb_strvalue, data->datum.length, quote);
-		p = talloc_array(ctx, char, len);
-		if (!p) return NULL;
-
-		ret = fr_snprint(p, len, data->vb_strvalue, data->datum.length, quote);
-		if (!fr_cond_assert(ret == (len - 1))) {
-			talloc_free(p);
-			return NULL;
-		}
+		FR_SBUFF_IN_ESCAPE_RETURN(&our_out, data->vb_strvalue, data->datum.length, e_rules);
 		break;
 	}
 
 	case FR_TYPE_OCTETS:
-		p = talloc_array(ctx, char, 2 + 1 + data->datum.length * 2);
-		if (!p) return NULL;
-		p[0] = '0';
-		p[1] = 'x';
-
-		if (data->vb_octets && data->datum.length) {
-			fr_bin2hex(&FR_SBUFF_OUT(p + 2, (data->datum.length * 2) + 1), &FR_DBUFF_TMP(data->vb_octets, data->datum.length),
-				   SIZE_MAX);
-			p[2 + (data->datum.length * 2)] = '\0';
-		} else {
-			p[2] = '\0';
-		}
+		FR_SBUFF_IN_CHAR_RETURN(&our_out, '0', 'x');
+		FR_SBUFF_RETURN(fr_bin2hex, &our_out, &FR_DBUFF_TMP(data->vb_octets, data->datum.length));
 		break;
 
 	/*
@@ -5016,110 +4999,146 @@ char *fr_value_box_asprint(TALLOC_CTX *ctx, fr_value_box_t const *data, char quo
 	 *	An example is tunneled ipv4 in ipv6 addresses.
 	 */
 	case FR_TYPE_IPV4_ADDR:
-	case FR_TYPE_IPV4_PREFIX:
-	{
-		char buff[INET_ADDRSTRLEN  + 4]; // + /prefix
-
-		buff[0] = '\0';
-		fr_value_box_snprint(buff, sizeof(buff), data, '\0');
-
-		p = talloc_typed_strdup(ctx, buff);
-	}
-	break;
-
 	case FR_TYPE_IPV6_ADDR:
+		if (!fr_inet_ntop(buf, sizeof(buf), &data->vb_ip)) return 0;
+		FR_SBUFF_IN_STRCPY_RETURN(&our_out, buf);
+		break;
+
+	case FR_TYPE_IPV4_PREFIX:
 	case FR_TYPE_IPV6_PREFIX:
-	{
-		char buff[INET6_ADDRSTRLEN + 4]; // + /prefix
-
-		buff[0] = '\0';
-		fr_value_box_snprint(buff, sizeof(buff), data, '\0');
-
-		p = talloc_typed_strdup(ctx, buff);
-	}
-	break;
+		if (!fr_inet_ntop_prefix(buf, sizeof(buf), &data->vb_ip)) return 0;
+		FR_SBUFF_IN_STRCPY_RETURN(&our_out, buf);
+		break;
 
 	case FR_TYPE_IFID:
-		p = talloc_typed_asprintf(ctx, "%x:%x:%x:%x",
-					  (data->vb_ifid[0] << 8) | data->vb_ifid[1],
-					  (data->vb_ifid[2] << 8) | data->vb_ifid[3],
-					  (data->vb_ifid[4] << 8) | data->vb_ifid[5],
-					  (data->vb_ifid[6] << 8) | data->vb_ifid[7]);
+		if (!fr_inet_ifid_ntop(buf, sizeof(buf), data->vb_ifid)) return 0;
+		FR_SBUFF_IN_STRCPY_RETURN(&our_out, buf);
 		break;
 
 	case FR_TYPE_ETHERNET:
-		p = talloc_typed_asprintf(ctx, "%02x:%02x:%02x:%02x:%02x:%02x",
-					  data->vb_ether[0], data->vb_ether[1],
-					  data->vb_ether[2], data->vb_ether[3],
-					  data->vb_ether[4], data->vb_ether[5]);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%02x:%02x:%02x:%02x:%02x:%02x",
+					   data->vb_ether[0], data->vb_ether[1],
+					   data->vb_ether[2], data->vb_ether[3],
+					   data->vb_ether[4], data->vb_ether[5]);
+
+
+	case FR_TYPE_IFID:
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%x:%x:%x:%x",
+					   (data->vb_ifid[0] << 8) | data->vb_ifid[1],
+					   (data->vb_ifid[2] << 8) | data->vb_ifid[3],
+					   (data->vb_ifid[4] << 8) | data->vb_ifid[5],
+					   (data->vb_ifid[6] << 8) | data->vb_ifid[7]);
 		break;
 
 	case FR_TYPE_BOOL:
-		p = talloc_typed_strdup(ctx, data->vb_uint8 ? "yes" : "no");
+		FR_SBUFF_IN_STRCPY_RETURN(&our_out, data->vb_uint8 ? "yes" : "no");
 		break;
 
 	case FR_TYPE_UINT8:
-		p = talloc_typed_asprintf(ctx, "%u", data->vb_uint8);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%u", data->vb_uint8);
 		break;
 
 	case FR_TYPE_UINT16:
-		p = talloc_typed_asprintf(ctx, "%u", data->vb_uint16);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%u", data->vb_uint16);
 		break;
 
 	case FR_TYPE_UINT32:
-		p = talloc_typed_asprintf(ctx, "%u", data->vb_uint32);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%u", data->vb_uint32);
 		break;
 
 	case FR_TYPE_UINT64:
-		p = talloc_typed_asprintf(ctx, "%" PRIu64, data->vb_uint64);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%" PRIu64, data->vb_uint64);
 		break;
 
 	case FR_TYPE_INT8:
-		p = talloc_typed_asprintf(ctx, "%d", data->vb_int8);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%d", data->vb_int8);
 		break;
 
 	case FR_TYPE_INT16:
-		p = talloc_typed_asprintf(ctx, "%d", data->vb_int16);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%d", data->vb_int16);
 		break;
 
 	case FR_TYPE_INT32:
-		p = talloc_typed_asprintf(ctx, "%d", data->vb_int32);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%d", data->vb_int32);
 		break;
 
 	case FR_TYPE_INT64:
-		p = talloc_typed_asprintf(ctx, "%" PRId64, data->vb_int64);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%" PRId64, data->vb_int64);
 		break;
 
 	case FR_TYPE_FLOAT32:
-		p = talloc_typed_asprintf(ctx, "%f", (double) data->vb_float32);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%f", (double) data->vb_float32);
 		break;
 
 	case FR_TYPE_FLOAT64:
-		p = talloc_typed_asprintf(ctx, "%g", data->vb_float64);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%g", data->vb_float64);
 		break;
 
 	case FR_TYPE_DATE:
 	{
-		char buff[128];
+		int64_t subseconds;
+
+		t = fr_unix_time_to_sec(data->vb_date);
+		(void) gmtime_r(&t, &s_tm);
+
+		if (!data->enumv || (data->enumv->flags.type_size == FR_TIME_RES_SEC)) {
+			FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%b %e %Y %H:%M:%S UTC", &s_tm);
+			goto done;
+		}
+
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%Y-%m-%dT%H:%M:%S", &s_tm);
+		subseconds = data->vb_date % NSEC;
 
 		/*
-		 *	This is complex, so call another function to
-		 *	do the work.
+		 *	Use RFC 3339 format, which is a
+		 *	profile of ISO8601.  The ISO standard
+		 *	allows a much more complex set of date
+		 *	formats.  The RFC is much stricter.
 		 */
-		(void) fr_value_box_snprint(buff, sizeof(buff), data, quote);
-		p = talloc_typed_strdup(ctx, buff);
+		switch (data->enumv->flags.type_size) {
+		default:
+			break;
+
+		case FR_TIME_RES_MSEC:
+			subseconds /= 1000000;
+			FR_SBUFF_IN_SPRINTF_RETURN(&our_out, ".%03" PRIi64, subseconds);
+			break;
+
+		case FR_TIME_RES_USEC:
+			subseconds /= 1000;
+			FR_SBUFF_IN_SPRINTF_RETURN(&our_out, ".%06" PRIi64, subseconds);
+			break;
+
+		case FR_TIME_RES_NSEC:
+			FR_SBUFF_IN_SPRINTF_RETURN(&our_out, ".%09" PRIi64, subseconds);
+			break;
+		}
+
+		/*
+		 *	And time zone.
+		 */
+		if (s_tm.tm_gmtoff != 0) {
+			int hours, minutes;
+
+			hours = s_tm.tm_gmtoff / 3600;
+			minutes = (s_tm.tm_gmtoff / 60) % 60;
+
+			FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%+03d:%02u", hours, minutes);
+		} else {
+			FR_SBUFF_IN_CHAR_RETURN(&our_out, 'Z');
+		}
 		break;
 	}
 
 	case FR_TYPE_SIZE:
-		p = talloc_typed_asprintf(ctx, "%zu", data->datum.size);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%zu", data->datum.size);
 		break;
 
 	case FR_TYPE_TIME_DELTA:
 	{
-		char *q;
-		uint64_t lhs, rhs;
-		fr_time_res_t res = FR_TIME_RES_SEC;
+		char		*q;
+		uint64_t	lhs, rhs;
+		fr_time_res_t	res = FR_TIME_RES_SEC;
 
 		if (data->enumv) res = data->enumv->flags.type_size;
 
@@ -5146,15 +5165,13 @@ char *fr_value_box_asprint(TALLOC_CTX *ctx, fr_value_box_t const *data, char quo
 			break;
 		}
 
-		p = talloc_typed_asprintf(ctx, "%" PRIu64 ".%09" PRIu64, lhs, rhs);
+		FR_SBUFF_IN_SPRINTF_RETURN(&our_out, "%" PRIu64 ".%09" PRIu64, lhs, rhs);
+		q = fr_sbuff_current(&our_out) - 1;
 
 		/*
 		 *	Truncate trailing zeros.
 		 */
-		q = p + strlen(p) - 1;
-		while (*q == '0') {
-			*(q--) = '\0';
-		}
+		while (*q == '0') *(q--) = '\0';
 
 		/*
 		 *	If there's nothing after the decimal point,
@@ -5166,20 +5183,19 @@ char *fr_value_box_asprint(TALLOC_CTX *ctx, fr_value_box_t const *data, char quo
 		} else {
 			q++;	/* to account for q-- above */
 		}
-
-		p = talloc_bstr_realloc(ctx, p, q - p);
+		fr_sbuff_set(&our_out, q);
 	}
 		break;
 
 	case FR_TYPE_ABINARY:
-		p = talloc_array(ctx, char, 128);
-		if (!p) return NULL;
-		print_abinary(NULL, p, 128, (uint8_t const *) &data->datum.filter, data->datum.length, 0);
+		print_abinary(NULL, buf, sizeof(buf), (uint8_t const *) &data->datum.filter, data->datum.length, 0);
+		FR_SBUFF_IN_STRCPY_RETURN(&our_out, buf);
 		break;
 
 	case FR_TYPE_GROUP:
 	{
-		fr_value_box_t vb;
+		fr_value_box_t	vb;
+		ssize_t		slen;
 
 		memset(&vb, 0, sizeof(vb));
 
@@ -5187,8 +5203,10 @@ char *fr_value_box_asprint(TALLOC_CTX *ctx, fr_value_box_t const *data, char quo
 		 *	Be lazy by just converting it to a string, and then printing the string.
 		 */
 		if (fr_value_box_cast_to_strvalue(NULL, &vb, FR_TYPE_STRING, NULL, data->vb_group) < 0) return NULL;
-		p = fr_value_box_asprint(ctx, &vb, quote);
+
+		slen = fr_value_box_print(&our_out, &vb, e_rules);
 		fr_value_box_clear(&vb);
+		if (slen < 0) return slen;
 	}
 		break;
 
@@ -5208,7 +5226,37 @@ char *fr_value_box_asprint(TALLOC_CTX *ctx, fr_value_box_t const *data, char quo
 		return NULL;
 	}
 
-	return p;
+done:
+	return fr_sbuff_set(out, &our_out);
+}
+
+/** Print one boxed value to a string with quotes (where needed)
+ *
+ * @param[in] out	Where to write the printed string.
+ * @param[in] data	Value box to print.
+ * @param[in] e_rules	To apply to FR_TYPE_STRING types.
+ *			Is not currently applied to any
+ *			other box type.
+ */
+ssize_t fr_value_box_print_quoted(fr_sbuff_t *out, fr_value_box_t const *data, fr_token_t quote)
+{
+	fr_sbuff_t	our_out = FR_SBUFF_NO_ADVANCE(out);
+
+	if (quote == '\0') return fr_value_box_print(out, data, NULL);
+
+	switch (data->type) {
+	case FR_TYPE_STRING:
+	case FR_TYPE_DATE:
+		FR_SBUFF_IN_CHAR_RETURN(&our_out, fr_token_quote[quote]);
+		FR_SBUFF_RETURN(fr_value_box_print, out, data, fr_value_escape_by_quote[quote]);
+		FR_SBUFF_IN_CHAR_RETURN(&our_out, fr_token_quote[quote]);
+		break;
+
+	default:
+		return fr_value_box_print(out, data, e_rules);
+	}
+
+	return fr_sbuff_set(out, &our_out);
 }
 
 /** Concatenate a list of value boxes
@@ -5549,7 +5597,7 @@ fr_value_box_t * fr_value_box_list_get(fr_value_box_t *head, int index)
  *	- The number of uint8s written to the out buffer.
  *	- A number >= outlen if truncation has occurred.
  */
-size_t fr_value_box_snprint(char *out, size_t outlen, fr_value_box_t const *data, char quote)
+size_t fr_value_box_print(char *out, size_t outlen, fr_value_box_t const *data, char quote)
 {
 	char		buf[1024];	/* Interim buffer to use with poorly behaved printing functions */
 	char const	*a = NULL;
@@ -5662,79 +5710,7 @@ size_t fr_value_box_snprint(char *out, size_t outlen, fr_value_box_t const *data
 		return snprintf(out, outlen, "%g", data->vb_float64);
 
 	case FR_TYPE_DATE:
-		t = fr_unix_time_to_sec(data->vb_date);
-		(void) gmtime_r(&t, &s_tm);
 
-		if (!data->enumv || (data->enumv->flags.type_size == FR_TIME_RES_SEC)) {
-			if (quote > 0) {
-				len = strftime(buf, sizeof(buf) - 1, "%%%b %e %Y %H:%M:%S UTC", &s_tm);
-			} else {
-				len = strftime(buf, sizeof(buf), "%b %e %Y %H:%M:%S UTC", &s_tm);
-			}
-
-		} else {
-			int64_t subseconds;
-
-			/*
-			 *	Print this out first, as it's always the same
-			 */
-			if (quote > 0) {
-				len = strftime(buf, sizeof(buf) - 1, "%%%Y-%m-%dT%H:%M:%S", &s_tm);
-			} else {
-				len = strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &s_tm);
-			}
-
-			subseconds = data->vb_date % NSEC;
-
-			/*
-			 *	Use RFC 3339 format, which is a
-			 *	profile of ISO8601.  The ISO standard
-			 *	allows a much more complex set of date
-			 *	formats.  The RFC is much stricter.
-			 */
-			switch (data->enumv->flags.type_size) {
-			default:
-				break;
-
-			case FR_TIME_RES_MSEC:
-				subseconds /= 1000000;
-				len += snprintf(buf + len, sizeof(buf) - len - 1, ".%03" PRIi64, subseconds);
-				break;
-
-			case FR_TIME_RES_USEC:
-				subseconds /= 1000;
-				len += snprintf(buf + len, sizeof(buf) - len - 1, ".%06" PRIi64, subseconds);
-				break;
-
-			case FR_TIME_RES_NSEC:
-				len += snprintf(buf + len, sizeof(buf) - len - 1, ".%09" PRIi64, subseconds);
-				break;
-			}
-
-			/*
-			 *	And time zone.
-			 */
-			if (s_tm.tm_gmtoff != 0) {
-				int hours, minutes;
-
-				hours = s_tm.tm_gmtoff / 3600;
-				minutes = (s_tm.tm_gmtoff / 60) % 60;
-
-				len += snprintf(buf + len, sizeof(buf) - len - 1, "%+03d:%02u", hours, minutes);
-			} else {
-				buf[len] = 'Z';
-				len++;
-			}
-		}
-
-		if (quote > 0) {
-			buf[0] = (char) quote;
-			buf[len] = (char) quote;
-			buf[len + 1] = '\0';
-			len++;	/* Account for trailing quote */
-		}
-		a = buf;
-		break;
 
 	case FR_TYPE_ABINARY:
 		len = print_abinary(NULL, buf, sizeof(buf),
@@ -5844,7 +5820,7 @@ size_t fr_value_box_snprint(char *out, size_t outlen, fr_value_box_t const *data
 
 		fr_cursor_init(&cursor, &data->vb_group);
 		while ((vb = fr_cursor_current(&cursor)) != NULL) {
-			len = fr_value_box_snprint(p, end - p, vb, quote);
+			len = fr_value_box_print(p, end - p, vb, quote);
 			p += len;
 			if (p >= end) break;
 			fr_cursor_next(&cursor);

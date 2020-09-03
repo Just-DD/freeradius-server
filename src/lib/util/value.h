@@ -742,7 +742,7 @@ int		fr_value_box_list_flatten_argv(TALLOC_CTX *ctx, char ***argv_p, fr_value_bo
  */
 char		*fr_value_box_asprint(TALLOC_CTX *ctx, fr_value_box_t const *data, char quote);
 
-size_t		fr_value_box_snprint(char *out, size_t outlen, fr_value_box_t const *data, char quote);
+size_t		fr_value_box_print(char *out, size_t outlen, fr_value_box_t const *data, char quote);
 
 /** @name Hashing
  *
