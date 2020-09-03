@@ -1174,7 +1174,7 @@ fr_sbuff_parse_rules_t const *tmpl_parse_rules_unquoted[T_TOKEN_LAST] = {
 };
 
 fr_sbuff_parse_rules_t const tmpl_parse_rules_bareword_quoted = {
-	.escapes = &(fr_sbuff_escape_rules_t){
+	.escapes = &(fr_sbuff_unescape_rules_t){
 		.chr = '\\',
 		/*
 		 *	Allow barewords to contain whitespace
@@ -3434,7 +3434,7 @@ ssize_t tmpl_print(fr_sbuff_t *out, tmpl_t const *vpt)
 	case TMPL_TYPE_REGEX_XLAT:
 	case TMPL_TYPE_REGEX_XLAT_UNRESOLVED:
 		FR_SBUFF_IN_CHAR_RETURN(&our_out, '/');
-		FR_SBUFF_IN_SNPRINT_RETURN(&our_out, vpt->name, vpt->len, '/');
+		FR_SBUFF_IN_ESCAPE_RETURN(&our_out, vpt->name, vpt->len, '/');
 		FR_SBUFF_IN_CHAR_RETURN(&our_out, '/');
 		FR_SBUFF_EXTEND_LOWAT_OR_RETURN(&our_out, REGEX_FLAG_BUFF_SIZE - 1);
 		fr_sbuff_advance(&our_out,
@@ -3445,21 +3445,21 @@ ssize_t tmpl_print(fr_sbuff_t *out, tmpl_t const *vpt)
 	case TMPL_TYPE_XLAT_UNRESOLVED:
 	case TMPL_TYPE_XLAT:
 		FR_SBUFF_IN_CHAR_RETURN(&our_out, '"');
-		FR_SBUFF_IN_SNPRINT_RETURN(&our_out, vpt->name, vpt->len, '"');
+		FR_SBUFF_IN_ESCAPE_RETURN(&our_out, vpt->name, vpt->len, '"');
 		FR_SBUFF_IN_CHAR_RETURN(&our_out, '"');
 		break;
 
 	case TMPL_TYPE_EXEC:
 	case TMPL_TYPE_EXEC_UNRESOLVED:
 		FR_SBUFF_IN_CHAR_RETURN(&our_out, '`');
-		FR_SBUFF_IN_SNPRINT_RETURN(&our_out, vpt->name, vpt->len, '`');
+		FR_SBUFF_IN_ESCAPE_RETURN(&our_out, vpt->name, vpt->len, '`');
 		FR_SBUFF_IN_CHAR_RETURN(&our_out, '`');
 		break;
 
 	case TMPL_TYPE_UNRESOLVED:
 		c = fr_token_quote[vpt->quote];
 		if (c) FR_SBUFF_IN_CHAR_RETURN(&our_out, c);
-		FR_SBUFF_IN_SNPRINT_RETURN(&our_out, vpt->name, vpt->len, c);
+		FR_SBUFF_IN_ESCAPE_RETURN(&our_out, vpt->name, vpt->len, c);
 		if (c) FR_SBUFF_IN_CHAR_RETURN(&our_out, c);
 		break;
 

@@ -45,7 +45,7 @@ RCSID("$Id$")
 /** These rules apply to literals and function arguments inside of an expansion
  *
  */
-static fr_sbuff_escape_rules_t const xlat_escape = {
+static fr_sbuff_unescape_rules_t const xlat_escape = {
 	.chr = '\\',
 	.subs = {
 		['a'] = '\a',
@@ -697,7 +697,7 @@ static int xlat_tokenize_literal(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_
 					);
 	fr_sbuff_term_t			*tokens;
 	fr_cursor_t			cursor;
-	fr_sbuff_escape_rules_t	const	*escapes;
+	fr_sbuff_unescape_rules_t	const	*escapes;
 
 	*head = NULL;
 
