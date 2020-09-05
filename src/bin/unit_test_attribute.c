@@ -75,7 +75,7 @@ do { \
 		return (_len); \
 	} while (0)
 
-#define RETURN_OK_WITH_ERROR(_len) \
+#define RETURN_OK_WITH_ERROR() \
 	do { \
 		result->rcode = RESULT_OK; \
 		result->file = __FILE__; \
@@ -1010,21 +1010,21 @@ static size_t command_normalise_attribute(command_result_t *result, command_file
 					  char *data, UNUSED size_t data_used, char *in, UNUSED size_t inlen)
 {
 	VALUE_PAIR 	*head = NULL;
-	size_t		len;
+	size_t		slen;
 
 	if (fr_pair_list_afrom_str(NULL, cc->active_dict ? cc->active_dict : cc->config->dict, in, &head) != T_EOL) {
 		RETURN_OK_WITH_ERROR();
 	}
 
-	len = fr_pair_snprint(data, COMMAND_OUTPUT_MAX, head);
+	slen = fr_pair_print(&FR_SBUFF_OUT(data, COMMAND_OUTPUT_MAX), head);
 	talloc_list_free(&head);
 
-	if (is_truncated(len, COMMAND_OUTPUT_MAX)) {
+	if (slen < 0) {
 		fr_strerror_printf("Encoder output would overflow output buffer");
 		RETURN_OK_WITH_ERROR();
 	}
 
-	RETURN_OK(len);
+	RETURN_OK(slen);
 }
 
 /** Change the working directory
@@ -1312,21 +1312,18 @@ static size_t command_decode_pair(command_result_t *result, command_file_ctx_t *
 		for (vp = fr_cursor_head(&cursor);
 		     vp;
 		     vp = fr_cursor_next(&cursor)) {
-			size_t len;
-
-			len = fr_pair_snprint(p, end - p, vp);
-			if (is_truncated(len, end - p)) {
+			if ((slen = fr_pair_print(&FR_SBUFF_OUT(p, end), vp)) < 0) {
 			oob:
 				fr_strerror_printf("Out of output buffer space");
 				CLEAR_TEST_POINT(cc);
 				RETURN_COMMAND_ERROR();
 			}
-			p += len;
+			p += slen;
 
 			if (vp->next) {
-				len = strlcpy(p, ", ", end - p);
-				if (is_truncated(len, end - p)) goto oob;
-				p += len;
+				slen = strlcpy(p, ", ", end - p);
+				if (is_truncated((size_t)slen, end - p)) goto oob;
+				p += slen;
 			}
 		}
 		fr_pair_list_free(&head);
@@ -1416,21 +1413,18 @@ static size_t command_decode_proto(command_result_t *result, command_file_ctx_t 
 		for (vp = fr_cursor_head(&cursor);
 		     vp;
 		     vp = fr_cursor_next(&cursor)) {
-			size_t len;
-
-			len = fr_pair_snprint(p, end - p, vp);
-			if (is_truncated(len, end - p)) {
+			if ((slen = fr_pair_print(&FR_SBUFF_OUT(p, end), vp)) < 0) {
 			oob:
 				fr_strerror_printf("Out of output buffer space");
 				CLEAR_TEST_POINT(cc);
 				RETURN_COMMAND_ERROR();
 			}
-			p += len;
+			p += slen;
 
 			if (vp->next) {
-				len = strlcpy(p, ", ", end - p);
-				if (is_truncated(len, end - p)) goto oob;
-				p += len;
+				slen = strlcpy(p, ", ", end - p);
+				if (is_truncated((size_t)slen, end - p)) goto oob;
+				p += slen;
 			}
 		}
 		fr_pair_list_free(&head);
@@ -1518,7 +1512,6 @@ static size_t command_encode_dns_label(command_result_t *result, command_file_ct
 static size_t command_decode_dns_label(command_result_t *result, command_file_ctx_t *cc,
 				       char *data, UNUSED size_t data_used, char *in, size_t inlen)
 {
-	size_t len;
 	ssize_t slen, total, i;
 	char *out, *end;
 	fr_value_box_t *box = talloc_zero(NULL, fr_value_box_t);
@@ -1535,6 +1528,7 @@ static size_t command_decode_dns_label(command_result_t *result, command_file_ct
 	for (i = 0; i < total; i += slen) {
 		slen = fr_dns_label_to_value_box(box, box, cc->buffer_start, total, cc->buffer_start + i, false);
 		if (slen <= 0) {
+		error:
 			talloc_free(box);
 			RETURN_OK_WITH_ERROR();
 		}
@@ -1547,8 +1541,9 @@ static size_t command_decode_dns_label(command_result_t *result, command_file_ct
 		/*
 		 *	We don't print it with quotes.
 		 */
-		len = fr_value_box_snprint(out, end - out, box, '\0');
-		out += len;
+		slen = fr_value_box_print(&FR_SBUFF_OUT(out, end - out), box, NULL);
+		if (slen <= 0) goto error;
+		out += slen;
 
 		fr_value_box_clear(box);
 	}
@@ -1973,10 +1968,8 @@ static size_t command_pair(command_result_t *result, command_file_ctx_t *cc,
 	for (vp = fr_cursor_init(&cursor, &head);
 	     vp != NULL;
 	     vp = fr_cursor_next(&cursor)) {
-		size_t len;
-
-		len = fr_pair_snprint(p, end - p, vp);
-		p += len;
+		if ((slen = fr_pair_print(&FR_SBUFF_OUT(p, end), vp)) <= 0) RETURN_OK_WITH_ERROR();
+		p += (size_t)slen;
 
 		if (p >= end) break;
 
@@ -1987,9 +1980,7 @@ static size_t command_pair(command_result_t *result, command_file_ctx_t *cc,
 	/*
 	 *	Delete the trailing ", ".
 	 */
-	if (p > data) {
-		p -= 2;
-	}
+	if (p > data) p -= 2;
 	*p = 0;
 
 	RETURN_OK(p - data);
@@ -2054,7 +2045,7 @@ static size_t command_value_box_normalise(command_result_t *result, UNUSED comma
 	fr_value_box_t *box2;
 	fr_type_t	type;
 	size_t		match_len;
-	size_t		len;
+	ssize_t		slen;
 	char		*p;
 
 	/*
@@ -2068,6 +2059,7 @@ static size_t command_value_box_normalise(command_result_t *result, UNUSED comma
 	fr_skip_whitespace(p);
 
 	if (fr_value_box_from_str(box, box, &type, NULL, p, -1, '"', false) < 0) {
+	error:
 		talloc_free(box);
 		RETURN_OK_WITH_ERROR();
 	}
@@ -2076,10 +2068,12 @@ static size_t command_value_box_normalise(command_result_t *result, UNUSED comma
 	 *	Don't print dates with enclosing quotation marks.
 	 */
 	if (type != FR_TYPE_DATE) {
-		len = fr_value_box_snprint(data, COMMAND_OUTPUT_MAX, box, '"');
+		slen = fr_value_box_print_quoted(&FR_SBUFF_OUT(data, COMMAND_OUTPUT_MAX), box,
+						 T_DOUBLE_QUOTED_STRING);
 	} else {
-		len = fr_value_box_snprint(data, COMMAND_OUTPUT_MAX, box, '\0');
+		slen = fr_value_box_print(&FR_SBUFF_OUT(data, COMMAND_OUTPUT_MAX), box, NULL);
 	}
+	if (slen <= 0) goto error;
 
 	/*
 	 *	Behind the scenes, parse the data
@@ -2087,7 +2081,7 @@ static size_t command_value_box_normalise(command_result_t *result, UNUSED comma
 	 *	box as last time.
 	 */
 	box2 = talloc_zero(NULL, fr_value_box_t);
-	if (fr_value_box_from_str(box2, box2, &type, NULL, data, len, '"', false) < 0) {
+	if (fr_value_box_from_str(box2, box2, &type, NULL, data, slen, '"', false) < 0) {
 		talloc_free(box2);
 		talloc_free(box);
 		RETURN_OK_WITH_ERROR();
@@ -2107,7 +2101,7 @@ static size_t command_value_box_normalise(command_result_t *result, UNUSED comma
 
 	talloc_free(box2);
 	talloc_free(box);
-	RETURN_OK(len);
+	RETURN_OK(slen);
 }
 
 static size_t command_write(command_result_t *result, command_file_ctx_t *cc,
@@ -2144,11 +2138,9 @@ static size_t command_xlat_normalise(command_result_t *result, command_file_ctx_
 				     char *data, UNUSED size_t data_used, char *in, UNUSED size_t inlen)
 {
 	ssize_t			dec_len;
-	size_t			len;
 	xlat_exp_t		*head = NULL;
 	size_t			input_len = strlen(in), escaped_len;
-	char			buff[1024];
-	fr_sbuff_parse_rules_t	p_rules = { .escapes = &fr_value_escape_double };
+	fr_sbuff_parse_rules_t	p_rules = { .escapes = &fr_value_unescape_double };
 
 	dec_len = xlat_tokenize(NULL, &head, NULL, &FR_SBUFF_IN(in, input_len), &p_rules,
 				&(tmpl_rules_t) { .dict_def = cc->active_dict ? cc->active_dict : cc->config->dict });
@@ -2165,10 +2157,8 @@ static size_t command_xlat_normalise(command_result_t *result, command_file_ctx_
 		goto return_error;
 	}
 
-	len = xlat_print(&FR_SBUFF_OUT(buff, sizeof(buff)), head);
-	escaped_len = fr_snprint(data, COMMAND_OUTPUT_MAX, buff, len, '"');
+	escaped_len = xlat_print(&FR_SBUFF_OUT(data, COMMAND_OUTPUT_MAX), head, &fr_value_escape_double);
 	TALLOC_FREE(head);
-
 	RETURN_OK(escaped_len);
 }
 
@@ -2202,7 +2192,7 @@ static size_t command_xlat_argv(command_result_t *result, command_file_ctx_t *cc
 	}
 
 	for (i = 0, p = data; i < argc; i++) {
-		(void)  xlat_print(&FR_SBUFF_OUT(buff, sizeof(buff)), argv[i]);
+		(void)  xlat_print(&FR_SBUFF_OUT(buff, sizeof(buff)), argv[i], NULL);
 
 		len = snprintf(p, data + COMMAND_OUTPUT_MAX - p, "[%d]{ %s }, ", i, buff);
 		p += len;
@@ -2774,7 +2764,7 @@ static int line_ranges_parse(TALLOC_CTX *ctx, fr_dlist_head_t *out, fr_sbuff_t *
 			 *	A bare '-' with no number means
 			 *	run all remaining lines.
 			 */
-			if (!fr_sbuff_extend(in)) {
+			if (fr_sbuff_extend(in) == 0) {
 				lr->end = UINT32_MAX;
 				return 0;
 			}

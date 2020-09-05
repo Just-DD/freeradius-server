@@ -465,7 +465,7 @@ int cf_pair_parse_value(TALLOC_CTX *ctx, void *out, UNUSED void *base, CONF_ITEM
 
 		if (!cp->printed) {
 			char *p;
-			p = fr_value_box_asprint(NULL, fr_box_time_delta(delta), 0);
+			fr_value_box_aprint(NULL, &p, fr_box_time_delta(delta), NULL);
 			cf_log_debug(cs, "%.*s%s = %s", PAIR_SPACE(cs), parse_spaces, cf_pair_attr(cp), p);
 			talloc_free(p);
 		}

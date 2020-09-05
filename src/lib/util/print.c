@@ -665,8 +665,12 @@ char *fr_vasprintf(TALLOC_CTX *ctx, char const *fmt, va_list ap)
 			 */
 			switch (*(p + 1)) {
 			case 'V':
+			case 'R':
 			{
 				fr_value_box_t const *in = va_arg(ap_q, fr_value_box_t const *);
+				fr_sbuff_escape_rules_t const *e_rules = NULL;
+
+				if (*(p + 1) == 'V') e_rules = &fr_value_escape_double;
 
 				/*
 				 *	Allocations that are not part of the output
@@ -674,7 +678,7 @@ char *fr_vasprintf(TALLOC_CTX *ctx, char const *fmt, va_list ap)
 				 *	any pool associated with it.
 				 */
 				if (in) {
-					subst = fr_value_box_asprint(NULL, in, '"');
+					fr_value_box_aprint(NULL, &subst, in, e_rules);
 					if (!subst) {
 						talloc_free(out);
 						va_end(ap_p);
@@ -780,7 +784,7 @@ char *fr_vasprintf(TALLOC_CTX *ctx, char const *fmt, va_list ap)
 					goto do_splice;
 				}
 
-				subst = fr_value_box_list_asprint(NULL, in, NULL, '"');
+				subst = fr_value_box_list_aprint(NULL, in, NULL, &fr_value_escape_double);
 			}
 				goto do_splice;
 
@@ -794,7 +798,7 @@ char *fr_vasprintf(TALLOC_CTX *ctx, char const *fmt, va_list ap)
 				}
 
 				VP_VERIFY(in);
-				subst = fr_pair_asprint(NULL, in, '"');
+				fr_pair_aprint(NULL, &subst, in);
 			}
 				goto do_splice;
 

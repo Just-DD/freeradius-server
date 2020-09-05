@@ -909,7 +909,7 @@ int fr_pair_cmp(VALUE_PAIR *a, VALUE_PAIR *b)
 							a->da->name);
 				return -1;
 			}
-			value = fr_pair_asprint(NULL, b, '\0');
+			fr_pair_aprint(NULL, &value, b);
 			if (!value) {
 				talloc_free(preg);
 				return -1;
@@ -1103,8 +1103,8 @@ void fr_pair_validate_debug(TALLOC_CTX *ctx, VALUE_PAIR const *failed[2])
 		return;
 	}
 
-	value = fr_pair_asprint(ctx, list, '"');
-	str = fr_pair_asprint(ctx, filter, '"');
+	fr_pair_aprint(ctx, &value, list);
+	fr_pair_aprint(ctx, &str, filter);
 
 	fr_strerror_printf("Attribute value \"%s\" didn't match filter: %s", value, str);
 
@@ -1616,7 +1616,7 @@ int fr_pair_value_strtrim(VALUE_PAIR *vp)
  * @param[in,out] vp to update
  * @param[in] fmt the format string
  */
-int fr_pair_value_asprintf(VALUE_PAIR *vp, char const *fmt, ...)
+int fr_pair_value_aprintf(VALUE_PAIR *vp, char const *fmt, ...)
 {
 	int	ret;
 	va_list	ap;
@@ -2023,102 +2023,6 @@ int fr_pair_value_mem_append_buffer(VALUE_PAIR *vp, uint8_t *src, bool tainted)
 	return ret;
 }
 
-/** Print the value of an attribute to a string
- *
- * @param[out] out Where to write the string.
- * @param[in] outlen Size of outlen (must be at least 3 bytes).
- * @param[in] vp to print.
- * @param[in] quote Char to add before and after printed value, if 0 no char will be added, if < 0
- *	raw string will be added.
- * @return
- *	- Length of data written to out.
- *	- Value >= outlen on truncation.
- */
-size_t fr_pair_value_snprint(char *out, size_t outlen, VALUE_PAIR const *vp, char quote)
-{
-	VP_VERIFY(vp);
-
-	if (vp->type == VT_XLAT) return snprintf(out, outlen, "%c%s%c", quote, vp->xlat, quote);
-
-	if (vp->da->type == FR_TYPE_GROUP) {
-		VALUE_PAIR *child, *head = vp->vp_ptr;
-		fr_cursor_t cursor;
-		char *p, *end;
-		size_t len;
-
-		if (!fr_cond_assert(head != NULL)) return 0;
-
-		/*
-		 *	"{  }"
-		 */
-		if (outlen < 4) return 0;
-
-		p = out;
-		end = out + outlen - 2; /* need room for the last " }" */
-
-		*(p++) = '{';
-		*(p++) = ' ';
-
-		for (child = fr_cursor_init(&cursor, &head);
-		     child != NULL;
-		     child = fr_cursor_next(&cursor)) {
-			VP_VERIFY(child);
-
-			len = fr_pair_snprint(p, end - p, child);
-			if (len == 0) goto done;
-
-			p += len;
-			*(p++) = ',';
-			*(p++) = ' ';
-
-		}
-
-		p -= 2;		/* over-write the last ", " */
-
-	done:
-		*(p++) = ' ';
-		*(p++) = '}';
-		return p - out;
-	}
-
-	return fr_value_box_snprint(out, outlen, &vp->data, quote);
-}
-
-/** Print one attribute value to a string
- *
- * @param ctx to allocate string in.
- * @param vp to print.
- * @param[in] quote the quotation character
- * @return a talloced buffer with the attribute operator and value.
- */
-char *fr_pair_value_asprint(TALLOC_CTX *ctx, VALUE_PAIR const *vp, char quote)
-{
-	VP_VERIFY(vp);
-
-	if (vp->type == VT_XLAT) return fr_asprint(ctx, vp->xlat, talloc_array_length(vp->xlat) - 1, quote);
-
-	/*
-	 *	Groups are magical.
-	 */
-	if (vp->da->type == FR_TYPE_GROUP) {
-		char *tmp = talloc_array(ctx, char, 1024);
-		char *out;
-		size_t len;
-
-		len = fr_pair_value_snprint(tmp, 1024, vp, quote);
-		if (len >= 1024) {
-			talloc_free(tmp);
-			return NULL;
-		}
-
-		out = talloc_memdup(ctx, tmp, len + 1);
-		talloc_free(tmp);
-		return out;
-	}
-
-	return fr_value_box_asprint(ctx, &vp->data, quote);
-}
-
 /** Return a const buffer for an enum type attribute
  *
  * Where the vp type is numeric but does not have any enumv, or its value
@@ -2153,7 +2057,7 @@ char const *fr_pair_value_enum(VALUE_PAIR const *vp, char buff[20])
 	}
 
 	if (!enumv) {
-		fr_pair_value_snprint(buff, 20, vp, '\0');
+		fr_pair_print_value_quoted(&FR_SBUFF_OUT(buff, 20), vp, T_BARE_WORD);
 		str = buff;
 	} else {
 		str = enumv->name;
@@ -2186,196 +2090,6 @@ int fr_pair_value_enum_box(fr_value_box_t const **out, VALUE_PAIR *vp)
 
 	*out = &vp->data;
 	return 0;
-}
-
-char *fr_pair_type_asprint(TALLOC_CTX *ctx, fr_type_t type)
-{
-	switch (type) {
-	case FR_TYPE_STRING :
-		return talloc_typed_strdup(ctx, "_");
-
-	case FR_TYPE_UINT64:
-	case FR_TYPE_SIZE:
-	case FR_TYPE_INT32:
-	case FR_TYPE_UINT8:
-	case FR_TYPE_UINT16:
-	case FR_TYPE_UINT32:
-	case FR_TYPE_DATE:
-		return talloc_typed_strdup(ctx, "0");
-
-	case FR_TYPE_IPV4_ADDR:
-		return talloc_typed_strdup(ctx, "?.?.?.?");
-
-	case FR_TYPE_IPV4_PREFIX:
-		return talloc_typed_strdup(ctx, "?.?.?.?/?");
-
-	case FR_TYPE_IPV6_ADDR:
-		return talloc_typed_strdup(ctx, "[:?:]");
-
-	case FR_TYPE_IPV6_PREFIX:
-		return talloc_typed_strdup(ctx, "[:?:]/?");
-
-	case FR_TYPE_OCTETS:
-		return talloc_typed_strdup(ctx, "??");
-
-	case FR_TYPE_ETHERNET:
-		return talloc_typed_strdup(ctx, "??:??:??:??:??:??:??:??");
-
-	case FR_TYPE_ABINARY:
-		return talloc_typed_strdup(ctx, "??");
-
-	case FR_TYPE_GROUP:
-		return talloc_typed_strdup(ctx, "{ ? }");
-
-	default :
-		break;
-	}
-
-	return talloc_typed_strdup(ctx, "<UNKNOWN-TYPE>");
-}
-
-/** Print one attribute and value to a string
- *
- * Print a VALUE_PAIR in the format:
-@verbatim
-	<attribute_name> <op> <value>
-@endverbatim
- * to a string.
- *
- * @param out Where to write the string.
- * @param outlen Length of output buffer.
- * @param vp to print.
- * @return
- *	- Length of data written to out.
- *	- value >= outlen on truncation.
- */
-size_t fr_pair_snprint(char *out, size_t outlen, VALUE_PAIR const *vp)
-{
-	char const	*token = NULL;
-	size_t		len, freespace = outlen;
-
-	if (!out) return 0;
-
-	*out = '\0';
-	if (!vp || !vp->da) return 0;
-
-	VP_VERIFY(vp);
-
-	if ((vp->op > T_INVALID) && (vp->op < T_TOKEN_LAST)) {
-		token = fr_tokens[vp->op];
-	} else {
-		token = "<INVALID-TOKEN>";
-	}
-
-	len = snprintf(out, freespace, "%s %s ", vp->da->name, token);
-
-	if (is_truncated(len, freespace)) return len;
-	out += len;
-	freespace -= len;
-
-	len = fr_pair_value_snprint(out, freespace, vp, '"');
-	if (is_truncated(len, freespace)) return (outlen - freespace) + len;
-	freespace -= len;
-
-	return (outlen - freespace);
-}
-
-/** Print one attribute and value to FP
- *
- * Complete string with '\\t' and '\\n' is written to buffer before printing to
- * avoid issues when running with multiple threads.
- *
- * @param fp to output to.
- * @param vp to print.
- */
-void fr_pair_fprint(FILE *fp, VALUE_PAIR const *vp)
-{
-	char	buf[1024];
-	char	*p = buf;
-	size_t	len;
-
-	if (!fp) return;
-	VP_VERIFY(vp);
-
-	*p++ = '\t';
-	len = fr_pair_snprint(p, sizeof(buf) - 1, vp);
-	if (!len) {
-		return;
-	}
-	p += len;
-
-	/*
-	 *	Deal with truncation gracefully
-	 */
-	if (((size_t) (p - buf)) >= (sizeof(buf) - 2)) {
-		p = buf + (sizeof(buf) - 2);
-	}
-
-	*p++ = '\n';
-	*p = '\0';
-
-	fputs(buf, fp);
-}
-
-
-/** Print a list of attributes and enumv
- *
- * @param[in] log to output to.
- * @param[in] vp to print.
- * @param[in] file where the message originated
- * @param[in] line where the message originated
- */
-void _fr_pair_list_log(fr_log_t const *log, VALUE_PAIR const *vp, char const *file, int line)
-{
-	VALUE_PAIR *our_vp;
-	fr_cursor_t cursor;
-
-	memcpy(&our_vp, &vp, sizeof(vp)); /* const work-arounds */
-
-	for (vp = fr_cursor_init(&cursor, &our_vp); vp; vp = fr_cursor_next(&cursor)) {
-		fr_log(log, L_DBG, file, line, "\t%pP", vp);
-	}
-}
-
-/** Print one attribute and value to a string
- *
- * Print a VALUE_PAIR in the format:
-@verbatim
-	<attribute_name> <op> <value>
-@endverbatim
- * to a string.
- *
- * @param ctx to allocate string in.
- * @param vp to print.
- * @param[in] quote the quotation character
- * @return a talloced buffer with the attribute operator and value.
- */
-char *fr_pair_asprint(TALLOC_CTX *ctx, VALUE_PAIR const *vp, char quote)
-{
-	char const	*token = NULL;
-	char 		*str, *value;
-
-	if (!vp || !vp->da) return 0;
-
-	VP_VERIFY(vp);
-
-	if ((vp->op > T_INVALID) && (vp->op < T_TOKEN_LAST)) {
-		token = fr_tokens[vp->op];
-	} else {
-		token = "<INVALID-TOKEN>";
-	}
-
-	value = fr_pair_value_asprint(ctx, vp, quote);
-
-	if (quote && (vp->vp_type == FR_TYPE_STRING)) {
-		str = talloc_typed_asprintf(ctx, "%s %s %c%s%c", vp->da->name, token, quote, value, quote);
-	} else {
-		str = talloc_typed_asprintf(ctx, "%s %s %s", vp->da->name, token, value);
-	}
-
-	talloc_free(value);
-
-	return str;
 }
 
 #ifdef WITH_VERIFY_PTR

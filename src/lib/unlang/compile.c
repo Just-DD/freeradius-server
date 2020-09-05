@@ -369,14 +369,9 @@ static bool pass2_fixup_map(fr_cond_t *c)
 
 			if (!c->cast) da = tmpl_da(map->lhs);
 
-			if (!pass2_fixup_tmpl(map, &map->rhs)) {
-				return false;
-			}
-
+			if (!pass2_fixup_tmpl(map, &map->rhs)) return false;
 		} else {
-			if (!pass2_fixup_tmpl(map, &map->rhs)) {
-				return false;
-			}
+			if (!pass2_fixup_tmpl(map, &map->rhs)) return false;
 		}
 	}
 
@@ -701,7 +696,7 @@ static void unlang_dump(unlang_t *instruction, int depth)
 
 			g = unlang_generic_to_group(c);
 			for (map = g->map; map != NULL; map = map->next) {
-				map_snprint(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map);
+				map_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map);
 				DEBUG("%.*s%s", depth + 1, unlang_spaces, buffer);
 			}
 

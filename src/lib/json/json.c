@@ -198,7 +198,7 @@ json_object *json_object_from_value_box(TALLOC_CTX *ctx, fr_value_box_t const *d
 		char		*p;
 		json_object	*obj;
 
-		p = fr_value_box_asprint(ctx, data, '\0');
+		fr_value_box_aprint(ctx, &p, data, NULL);
 		if (!p) return NULL;
 
 		obj = json_object_new_string(p);
@@ -289,7 +289,7 @@ char *fr_json_from_string(TALLOC_CTX *ctx, char const *s, bool include_quotes)
  */
 size_t fr_json_from_pair(char *out, size_t outlen, VALUE_PAIR const *vp)
 {
-	size_t len, freespace = outlen;
+	size_t slen, freespace = outlen;
 
 	switch (vp->vp_type) {
 	case FR_TYPE_UINT32:
@@ -319,13 +319,13 @@ size_t fr_json_from_pair(char *out, size_t outlen, VALUE_PAIR const *vp)
 
 		/* Indicate truncation */
 		if (!tmp) return outlen + 1;
-		len = strlen(tmp);
-		if (freespace <= len) return outlen + 1;
+		slen = strlen(tmp);
+		if (freespace <= slen) return outlen + 1;
 
 		strcpy(out, tmp);
 		talloc_free(tmp);
 
-		return len;
+		return slen;
 	}
 
 	/* Indicate truncation */
@@ -333,10 +333,11 @@ size_t fr_json_from_pair(char *out, size_t outlen, VALUE_PAIR const *vp)
 	*out++ = '"';
 	freespace--;
 
-	len = fr_pair_value_snprint(out, freespace, vp, 0);
-	if (is_truncated(len, freespace)) return (outlen - freespace) + len;
-	out += len;
-	freespace -= len;
+	slen = fr_pair_print_value_quoted(&FR_SBUFF_OUT(out, freespace), vp, T_BARE_WORD);
+	if (slen < 0) return slen;
+
+	out += (size_t)slen;
+	freespace -= (size_t)slen;
 
 	/* Indicate truncation */
 	if (freespace < 2) return outlen + 1;

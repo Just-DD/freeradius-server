@@ -54,7 +54,7 @@ condition &User-Name =~ /@|./
 match &User-Name =~ /@|./
 
 condition &User-Name =~ /@|\\/
-match ERROR offset 17 \ at end of pattern
+match &User-Name =~ /@|\\/
 
 condition &User-Name =~ /^([^\\]*)\\(.*)$/
 match &User-Name =~ /^([^\\]*)\\(.*)$/

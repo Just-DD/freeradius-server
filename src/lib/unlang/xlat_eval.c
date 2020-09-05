@@ -106,7 +106,7 @@ static char *xlat_fmt_aprint(TALLOC_CTX *ctx, xlat_exp_t const *node)
 {
 	switch (node->type) {
 	case XLAT_LITERAL:
-	case XLAT_CHILD:
+	case XLAT_GROUP:
 		return talloc_asprintf(ctx, "%s", node->fmt);
 
 	case XLAT_ONE_LETTER:
@@ -756,7 +756,7 @@ xlat_action_t xlat_frame_eval_repeat(TALLOC_CTX *ctx, fr_cursor_t *out,
 
 			if (*result) {
 				(void) talloc_list_get_type_abort(*result, fr_value_box_t);
-				result_str = fr_value_box_list_asprint(NULL, *result, NULL, '\0');
+				result_str = fr_value_box_list_aprint(NULL, *result, NULL, NULL);
 				if (!result_str) return XLAT_ACTION_FAIL;
 			} else {
 				result_str = talloc_typed_strdup(NULL, "");
@@ -891,7 +891,7 @@ xlat_action_t xlat_frame_eval_repeat(TALLOC_CTX *ctx, fr_cursor_t *out,
 	}
 		break;
 
-	case XLAT_CHILD:
+	case XLAT_GROUP:
 	{
 		fr_value_box_t	*value;
 		fr_cursor_t from;
@@ -915,7 +915,7 @@ xlat_action_t xlat_frame_eval_repeat(TALLOC_CTX *ctx, fr_cursor_t *out,
 
 			if (*result) {
 				(void) talloc_list_get_type_abort(*result, fr_value_box_t);
-				str = fr_value_box_list_asprint(value, *result, NULL, '\0');
+				str = fr_value_box_list_aprint(value, *result, NULL, NULL);
 				if (!str) return XLAT_ACTION_FAIL;
 			} else {
 				str = talloc_typed_strdup(value, "");
@@ -1118,7 +1118,7 @@ xlat_action_t xlat_frame_eval(TALLOC_CTX *ctx, fr_cursor_t *out, xlat_exp_t cons
 			xa = XLAT_ACTION_PUSH_CHILD;
 			goto finish;
 
-		case XLAT_CHILD:
+		case XLAT_GROUP:
 			XLAT_DEBUG("** [%i] %s(child) - %%{%s ...}", unlang_interpret_stack_depth(request), __FUNCTION__,
 				   node->fmt);
 
@@ -1174,7 +1174,7 @@ static char *xlat_sync_eval(TALLOC_CTX *ctx, REQUEST *request, xlat_exp_t const 
 		XLAT_DEBUG("%.*sxlat_sync_eval LITERAL", lvl, xlat_spaces);
 		return talloc_typed_strdup(ctx, node->fmt);
 
-	case XLAT_CHILD:
+	case XLAT_GROUP:
 		XLAT_DEBUG("%.*sxlat_sync_eval CHILD", lvl, xlat_spaces);
 		return talloc_typed_strdup(ctx, node->fmt);
 
@@ -1210,7 +1210,7 @@ static char *xlat_sync_eval(TALLOC_CTX *ctx, REQUEST *request, xlat_exp_t const 
 		 *	cast to a string until we're actually doing
 		 *	the concatenation.
 		 */
-		str = fr_value_box_asprint(ctx, value, '"');
+		fr_value_box_aprint(ctx, &str, value, &fr_value_escape_double);
 		if (!str) {
 		attr_error:
 			RPERROR("Printing box to string failed");
@@ -1226,7 +1226,7 @@ static char *xlat_sync_eval(TALLOC_CTX *ctx, REQUEST *request, xlat_exp_t const 
 		while ((value = fr_cursor_next(&cursor))) {
 			char *more;
 
-			more = fr_value_box_asprint(ctx, value, '"');
+			fr_value_box_aprint(ctx, &more, value, &fr_value_escape_double);
 			if (!more) goto attr_error;
 			str = talloc_strdup_append_buffer(str, ",");
 			str = talloc_strdup_append_buffer(str, more);
@@ -1287,7 +1287,7 @@ static char *xlat_sync_eval(TALLOC_CTX *ctx, REQUEST *request, xlat_exp_t const 
 			}
 
 			if (result) {
-				str = fr_value_box_list_asprint(ctx, result, NULL, '"');
+				str = fr_value_box_list_aprint(ctx, result, NULL, &fr_value_escape_double);
 				if (!str) {
 					RPEDEBUG("Failed concatenating xlat result string");
 					talloc_free(pool);
@@ -1692,7 +1692,7 @@ int xlat_aeval_compiled_argv(TALLOC_CTX *ctx, char ***argv, REQUEST *request,
 	size_t			count;
 	xlat_exp_t const	*node;
 
-	if (xlat->type != XLAT_CHILD) return -1;
+	if (xlat->type != XLAT_GROUP) return -1;
 
 	for (count = 0, node = xlat; node != NULL; node = node->next) count++;
 
@@ -1722,7 +1722,7 @@ int xlat_flatten_compiled_argv(TALLOC_CTX *ctx, xlat_exp_t const ***argv, xlat_e
 	xlat_exp_t const	*node;
 	size_t			count;
 
-	if (xlat->type != XLAT_CHILD) return -1;
+	if (xlat->type != XLAT_GROUP) return -1;
 
 	for (count = 0, node = xlat; node != NULL; node = node->next) count++;
 
@@ -1842,8 +1842,8 @@ int xlat_eval_walk(xlat_exp_t *exp, xlat_walker_t walker, xlat_type_t type, void
 			if (ret < 0) return ret;
 			break;
 
-		case XLAT_CHILD:
-			if (!type || (type & XLAT_CHILD)) {
+		case XLAT_GROUP:
+			if (!type || (type & XLAT_GROUP)) {
 				ret = walker(node, uctx);
 				if (ret < 0) return ret;
 			}
@@ -1904,7 +1904,7 @@ bool xlat_async_required(xlat_exp_t const *xlat)
 {
 	xlat_exp_t const *node;
 
-	if (xlat->type != XLAT_CHILD) {
+	if (xlat->type != XLAT_GROUP) {
 		return !xlat->flags.needs_async;
 	}
 

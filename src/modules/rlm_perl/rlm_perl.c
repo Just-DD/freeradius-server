@@ -647,12 +647,14 @@ static void perl_vp_to_svpvn_element(REQUEST *request, AV *av, VALUE_PAIR const 
 	default:
 	{
 		char	buffer[1024];
-		size_t	len;
+		size_t	slen;
 
-		len = fr_pair_value_snprint(buffer, sizeof(buffer), vp, '\0');
-		RDEBUG2("$%s{'%s'}[%i] = &%s:%s -> '%s'", hash_name, vp->da->name, *i,
-		        list_name, vp->da->name, buffer);
-		sv = newSVpvn(buffer, truncate_len(len, sizeof(buffer)));
+		slen = fr_pair_print_value_quoted(&FR_SBUFF_OUT(buffer, sizeof(buffer)), vp, T_BARE_WORD);
+		if (slen < 0) return;
+
+		RDEBUG2("$%s{'%s'}[%i] = &%s:%s -> '%pV'", hash_name, vp->da->name, *i,
+		        list_name, vp->da->name, fr_box_strvalue_len(buffer, (size_t)slen));
+		sv = newSVpvn(buffer, (size_t)slen);
 	}
 		break;
 	}
@@ -726,13 +728,13 @@ static void perl_store_vps(UNUSED TALLOC_CTX *ctx, REQUEST *request, VALUE_PAIR 
 		default:
 		{
 			char buffer[1024];
-			size_t len;
+			size_t slen;
 
-			len = fr_pair_value_snprint(buffer, sizeof(buffer), vp, '\0');
-			RDEBUG2("$%s{'%s'} = &%s:%s -> '%s'", hash_name, vp->da->name,
-			       list_name, vp->da->name, buffer);
+			slen = fr_pair_print_value_quoted(&FR_SBUFF_OUT(buffer, sizeof(buffer)), vp, T_BARE_WORD);
+			RDEBUG2("$%s{'%s'} = &%s:%s -> '%pV'", hash_name, vp->da->name,
+			        list_name, vp->da->name, fr_box_strvalue_len(buffer, (size_t)slen));
 			(void)hv_store(rad_hv, name, strlen(name),
-				       newSVpvn(buffer, truncate_len(len, sizeof(buffer))), 0);
+				       newSVpvn(buffer, (size_t)(slen)), 0);
 		}
 			break;
 		}

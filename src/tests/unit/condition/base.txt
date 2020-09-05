@@ -238,10 +238,10 @@ match <ipaddr>127.0.0.1 == "%{md4: 127.0.0.1}"
 #  Bare %{...} is allowed.
 #
 condition <ipaddr>127.0.0.1 == %{md4:127.0.0.1}
-match <ipaddr>127.0.0.1 == "%{md4:127.0.0.1}"
+match <ipaddr>127.0.0.1 == %{md4:127.0.0.1}
 
 condition <ipaddr>127.0.0.1 == %{md4: SELECT user FROM table WHERE user='%{User-Name}'}
-match <ipaddr>127.0.0.1 == "%{md4: SELECT user FROM table WHERE user='%{User-Name}'}"
+match <ipaddr>127.0.0.1 == %{md4: SELECT user FROM table WHERE user='%{User-Name}'}
 
 condition <ether> 00:11:22:33:44:55 == "00:11:22:33:44:55"
 match true
@@ -550,7 +550,7 @@ condition &not-a-packet.User-Name == &not-a-packet.User-Name
 match &not-a-packet.User-Name == &not-a-packet.User-Name
 
 #
-#  The LHS is a string with ASCII 5C 30 30 30 inside of it.
+#  The LHS is a string with ASCII 5C 30 30 30 inside of it vs the RHS which should contain ASCII 0.
 #
 condition ('i have scary embedded things\000 inside me' == "i have scary embedded things\000 inside me")
 match false

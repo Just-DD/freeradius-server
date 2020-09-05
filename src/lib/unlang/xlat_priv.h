@@ -78,7 +78,7 @@ typedef struct xlat_s {
 typedef enum {
 	XLAT_INVALID		= 0x0000,		//!< Bad expansion
 	XLAT_LITERAL		= 0x0001,		//!< Literal string
-	XLAT_ONE_LETTER		= 0x0002,		//!< Literal string with %v
+	XLAT_ONE_LETTER		= 0x0002,		//!< Special "one-letter" expansion
 	XLAT_FUNC		= 0x0004,		//!< xlat module
 	XLAT_FUNC_UNRESOLVED	= 0x0008,		//!< func needs resolution during pass2.
 	XLAT_VIRTUAL		= 0x0010,		//!< virtual attribute
@@ -88,7 +88,7 @@ typedef enum {
 	XLAT_REGEX		= 0x0080,		//!< regex reference
 #endif
 	XLAT_ALTERNATE		= 0x0100,		//!< xlat conditional syntax :-
-	XLAT_CHILD		= 0x0200		//!< encapsulated string of xlats
+	XLAT_GROUP		= 0x0200		//!< encapsulated string of xlats
 } xlat_type_t;
 
 /** An xlat function call
@@ -110,6 +110,7 @@ typedef struct {
 struct xlat_exp {
 	char const	*fmt;		//!< The original format string.
 	size_t		len;		//!< Length of the format string.
+	fr_token_t	quote;		//!< Type of quoting around XLAT_GROUP types.
 
 	xlat_flags_t	flags;		//!< Flags that control resolution and evaluation.
 

@@ -242,10 +242,11 @@ static int mruby_vps_to_array(REQUEST *request, mrb_value *out, mrb_state *mrb, 
 
 		default:
 		{
-			char *in;
+			char	*in;
+			size_t	len;
 
-			in = fr_value_box_asprint(request, &vp->data, '\0');
-			to_cast = mrb_str_new(mrb, in, talloc_array_length(in) - 1);
+			len = fr_value_box_aprint(request, &in, &vp->data, NULL);
+			to_cast = mrb_str_new(mrb, in, len);
 			talloc_free(in);
 		}
 			break;

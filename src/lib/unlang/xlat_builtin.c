@@ -1562,9 +1562,8 @@ static ssize_t xlat_func_xlat(TALLOC_CTX *ctx, char **out, size_t outlen,
 	 *	If it's not a string, treat it as a literal
 	 */
 	} else {
-		*out = fr_pair_value_asprint(ctx, vp, '\0');
+		slen = fr_value_box_aprint(ctx, out, &vp->data, NULL);
 		if (!*out) return -1;
-		slen = talloc_array_length(*out) - 1;
 	}
 
 	REXDENT();
@@ -1703,7 +1702,7 @@ static xlat_action_t xlat_func_bin(TALLOC_CTX *ctx, fr_cursor_t *out,
 	 */
 	if (!*in) return XLAT_ACTION_DONE;
 
-	buff = fr_value_box_list_asprint(NULL, *in, NULL, '\0');
+	buff = fr_value_box_list_aprint(NULL, *in, NULL, NULL);
 	if (!buff) return XLAT_ACTION_FAIL;
 
 	len = talloc_array_length(buff) - 1;
@@ -1786,7 +1785,7 @@ static xlat_action_t xlat_func_concat(TALLOC_CTX *ctx, fr_cursor_t *out,
 		return XLAT_ACTION_FAIL;
 	}
 
-	buff = fr_value_box_list_asprint(result, (*in)->next, sep, '\0');
+	buff = fr_value_box_list_aprint(result, (*in)->next, sep, NULL);
 	if (!buff) goto error;
 
 	fr_value_box_bstrdup_buffer_shallow(NULL, result, NULL, buff, fr_value_box_list_tainted((*in)->next));
@@ -2189,7 +2188,7 @@ static xlat_action_t xlat_func_pairs(TALLOC_CTX *ctx, fr_cursor_t *out,
 		MEM(vb = fr_value_box_alloc(ctx, FR_TYPE_STRING, NULL, false));
 
 		vp->op = T_OP_EQ;
-		buff = fr_pair_asprint(vb, vp, '"');
+		fr_pair_aprint(vb, &buff, vp);
 		vp->op = op;
 
 		vb->vb_strvalue = buff;

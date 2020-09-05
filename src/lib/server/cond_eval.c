@@ -137,7 +137,7 @@ int cond_eval_tmpl(REQUEST *request, int modreturn, UNUSED int depth, tmpl_t con
 
 	switch (vpt->type) {
 	case TMPL_TYPE_UNRESOLVED:
-		modcode = fr_table_value_by_str(rcode_table, vpt->name, RLM_MODULE_UNKNOWN);
+		modcode = fr_table_value_by_str(rcode_table, vpt->data.unescaped, RLM_MODULE_UNKNOWN);
 		if (modcode != RLM_MODULE_UNKNOWN) {
 			rcode = (modcode == modreturn);
 			break;
@@ -152,7 +152,7 @@ int cond_eval_tmpl(REQUEST *request, int modreturn, UNUSED int depth, tmpl_t con
 		 *	The VPT *doesn't* have a "bare word" type,
 		 *	which arguably it should.
 		 */
-		rcode = (*vpt->name != '\0');
+		rcode = (*vpt->data.unescaped != '\0');
 		break;
 
 	case TMPL_TYPE_ATTR:
@@ -169,8 +169,6 @@ int cond_eval_tmpl(REQUEST *request, int modreturn, UNUSED int depth, tmpl_t con
 	{
 		char	*p;
 		ssize_t	slen;
-
-		if (!*vpt->name) return false;
 
 		slen = tmpl_aexpand(request, &p, request, vpt, NULL, NULL);
 		if (slen < 0) {
@@ -436,7 +434,7 @@ static int cond_normalise_and_cmp(REQUEST *request, fr_cond_t const *c, fr_value
 	fr_value_box_t		lhs_cast = { .type = FR_TYPE_INVALID };
 	fr_value_box_t		rhs_cast = { .type = FR_TYPE_INVALID };
 
-	xlat_escape_legacy_t		escape = NULL;
+	xlat_escape_legacy_t	escape = NULL;
 
 	/*
 	 *	Cast operand to correct type.
@@ -578,7 +576,7 @@ do {\
 			}
 			fr_value_box_bstrndup_shallow(&data, NULL, p, ret, false);
 		} else {
-			fr_value_box_bstrndup_shallow(&data, NULL, map->rhs->name, map->rhs->len, false);
+			fr_value_box_bstrdup_buffer_shallow(NULL, &data, NULL, map->rhs->data.unescaped, false);
 		}
 		rhs = &data;
 
@@ -703,7 +701,7 @@ int cond_eval_map(REQUEST *request, UNUSED int modreturn, UNUSED int depth, fr_c
 
 			fr_value_box_bstrndup_shallow(&data, NULL, p, ret, false);
 		} else {
-			fr_value_box_bstrndup_shallow(&data, NULL, map->lhs->name, map->lhs->len, false);
+			fr_value_box_bstrdup_buffer_shallow(NULL, &data, NULL, map->lhs->data.unescaped, false);
 		}
 
 		rcode = cond_normalise_and_cmp(request, c, &data);

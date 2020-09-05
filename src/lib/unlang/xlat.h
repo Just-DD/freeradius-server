@@ -302,7 +302,10 @@ ssize_t 	xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *fl
 ssize_t		xlat_tokenize(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *flags, fr_sbuff_t *in,
 			      fr_sbuff_parse_rules_t const *p_rules, tmpl_rules_t const *ar_rules);
 
-ssize_t		xlat_print(fr_sbuff_t *in, xlat_exp_t const *node);
+ssize_t		xlat_print(fr_sbuff_t *in, xlat_exp_t const *node, fr_sbuff_escape_rules_t const *e_rules);
+
+static inline size_t xlat_aprint(TALLOC_CTX *ctx, char **out, xlat_exp_t const *node, fr_sbuff_escape_rules_t const *e_rules)
+		SBUFF_OUT_TALLOC_FUNC_NO_LEN_DEF(xlat_print, node, e_rules);
 
 void		xlat_debug(xlat_exp_t const *node);
 
@@ -312,10 +315,6 @@ bool		xlat_to_literal(TALLOC_CTX *ctx, char **str, xlat_exp_t **head);
 
 int		xlat_resolve(xlat_exp_t **head, xlat_flags_t *flags, bool allow_unresolved);
 
-
-
-static inline size_t xlat_aprint(TALLOC_CTX *ctx, char **out, xlat_exp_t const *node)
-SBUFF_OUT_TALLOC_FUNC_NO_LEN_DEF(xlat_print, node);
 
 #define XLAT_DEFAULT_BUF_LEN	2048
 

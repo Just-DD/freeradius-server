@@ -587,7 +587,7 @@ json_object *mod_value_pair_to_json_object(REQUEST *request, VALUE_PAIR *vp)
 		/* debug */
 		RDEBUG3("assigning unhandled '%s' as string", vp->da->name);
 		/* get standard value */
-		fr_pair_value_snprint(value, sizeof(value), vp, 0);
+		fr_pair_print_value_quoted(&FR_SBUFF_OUT(value, sizeof(value)), vp, T_BARE_WORD);
 		/* return string value from above */
 		return json_object_new_string(value);
 	}

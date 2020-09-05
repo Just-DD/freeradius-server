@@ -36,16 +36,20 @@ RCSID("$Id$")
 #include <ctype.h>
 
 #undef XLAT_DEBUG
+#undef XLAT_HEXDUMP
 #ifdef DEBUG_XLAT
-#  define XLAT_DEBUG(_fmt, ...)		DEBUG3("%s[%i] "_fmt, __FILE__, __LINE__, ##__VA_ARGS__)
+#  define XLAT_DEBUG(_fmt, ...)			DEBUG3("%s[%i] "_fmt, __FILE__, __LINE__, ##__VA_ARGS__)
+#  define XLAT_HEXDUMP(_data, _len, _fmt, ...)	HEXDUMP3(_data, _len, "%s[%i] "_fmt, __FILE__, __LINE__, ##__VA_ARGS__)
 #else
 #  define XLAT_DEBUG(...)
+#  define XLAT_HEXDUMP(...)
 #endif
 
 /** These rules apply to literals and function arguments inside of an expansion
  *
  */
-static fr_sbuff_unescape_rules_t const xlat_escape = {
+static fr_sbuff_unescape_rules_t const xlat_unescape = {
+	.name = "xlat",
 	.chr = '\\',
 	.subs = {
 		['a'] = '\a',
@@ -57,10 +61,34 @@ static fr_sbuff_unescape_rules_t const xlat_escape = {
 		['v'] = '\v',
 		['\\'] = '\\',
 		['%'] = '%',	/* Expansion begin */
-		[':'] = ':',	/* Alternation begin */
 		['}'] = '}'	/* Expansion end */
 	},
 	.do_hex = true,
+	.do_oct = true
+};
+
+/** These rules apply to literals and function arguments inside of an expansion
+ *
+ */
+static fr_sbuff_escape_rules_t const xlat_escape = {
+	.name = "xlat",
+	.chr = '\\',
+	.subs = {
+		['\a'] = 'a',
+		['\b'] = 'b',
+		['\n'] = 'n',
+		['\r'] = 'r',
+		['\t'] = 't',
+		['\v'] = 'v',
+		['\\'] = '\\',
+		['%'] = '%',	/* Expansion begin */
+		['}'] = '}'	/* Expansion end */
+	},
+	.esc = {
+		SBUFF_CHAR_UNPRINTABLES_LOW,
+		SBUFF_CHAR_UNPRINTABLES_EXTENDED
+	},
+	.do_utf8 = true,
 	.do_oct = true
 };
 
@@ -68,7 +96,7 @@ static fr_sbuff_unescape_rules_t const xlat_escape = {
  *
  */
 static fr_sbuff_parse_rules_t const xlat_rules = {
-	.escapes = &xlat_escape
+	.escapes = &xlat_unescape
 };
 
 /** Allocate an xlat node with no name, and no type set
@@ -520,7 +548,7 @@ static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flag
 				);
 
 	fr_sbuff_parse_rules_t	attr_p_rules = {
-					.escapes = &xlat_escape,
+					.escapes = &xlat_unescape,
 					.terminals = &FR_SBUFF_TERM("}")
 				};
 
@@ -726,8 +754,10 @@ static int xlat_tokenize_literal(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_
 			xlat_exp_set_type(node, XLAT_LITERAL);
 			xlat_exp_set_name_buffer_shallow(node, str);
 
-			XLAT_DEBUG("LITERAL <-- %pV",
+			XLAT_DEBUG("LITERAL (%s)<-- %pV",
+				   escapes ? escapes->name : "(none)",
 				   fr_box_strvalue_len(str, talloc_array_length(str) - 1));
+			XLAT_HEXDUMP((uint8_t const *)str, talloc_array_length(str) - 1, " LITERAL ");
 			node->flags.needs_async = false; /* literals are always true */
 			fr_cursor_insert(&cursor, node);
 			node = NULL;
@@ -846,7 +876,7 @@ void xlat_debug(xlat_exp_t const *node)
 			INFO("literal --> %s", node->fmt);
 			break;
 
-		case XLAT_CHILD:
+		case XLAT_GROUP:
 			INFO("child --> %s", node->fmt);
 			INFO("{");
 			xlat_debug(node->child);
@@ -934,9 +964,9 @@ void xlat_debug(xlat_exp_t const *node)
  *
  * @param[in] out	Where to write the output string.
  * @param[in] head	First node to print.
- *
+ * @param[in] e_rules	Specifying how to escape literal values.
  */
-ssize_t xlat_print(fr_sbuff_t *out, xlat_exp_t const *head)
+ssize_t xlat_print(fr_sbuff_t *out, xlat_exp_t const *head, fr_sbuff_escape_rules_t const *e_rules)
 {
 	ssize_t			slen;
 	size_t			at_in = fr_sbuff_used_total(out);
@@ -946,14 +976,15 @@ ssize_t xlat_print(fr_sbuff_t *out, xlat_exp_t const *head)
 
 	while (node) {
 		switch (node->type) {
-		case XLAT_CHILD:
-			FR_SBUFF_IN_CHAR_RETURN(out, '"');
-			xlat_print(out, node->child);
-			FR_SBUFF_IN_CHAR_RETURN(out, '"');
+		case XLAT_GROUP:
+			if (node->quote != T_BARE_WORD) FR_SBUFF_IN_CHAR_RETURN(out, fr_token_quote[node->quote]);
+			xlat_print(out, node->child, fr_value_escape_by_quote[node->quote]);
+			if (node->quote != T_BARE_WORD) FR_SBUFF_IN_CHAR_RETURN(out, fr_token_quote[node->quote]);
+			if (node->next) FR_SBUFF_IN_CHAR_RETURN(out, ' ');	/* Add ' ' between args */
 			goto next;
 
 		case XLAT_LITERAL:
-			FR_SBUFF_IN_BSTRCPY_BUFFER_RETURN(out, node->fmt);
+			FR_SBUFF_IN_ESCAPE_BUFFER_RETURN(out, node->fmt, e_rules);
 			goto next;
 
 		case XLAT_ONE_LETTER:
@@ -967,7 +998,7 @@ ssize_t xlat_print(fr_sbuff_t *out, xlat_exp_t const *head)
 		FR_SBUFF_IN_STRCPY_LITERAL_RETURN(out, "%{");
 		switch (node->type) {
 		case XLAT_ATTRIBUTE:
-			slen = tmpl_print_attr_str(out, node->attr);
+			slen = tmpl_print_attr_str(out, node->attr, TMPL_ATTR_REF_PREFIX_NO);
 			if (slen < 0) {
 			error:
 				return slen;
@@ -991,7 +1022,7 @@ ssize_t xlat_print(fr_sbuff_t *out, xlat_exp_t const *head)
 			FR_SBUFF_IN_CHAR_RETURN(out, ':');
 
 			if (node->child) {
-				slen = xlat_print(out, node->child);
+				slen = xlat_print(out, node->child, &xlat_escape);
 				if (slen < 0) goto error;
 			}
 			break;
@@ -1001,17 +1032,17 @@ ssize_t xlat_print(fr_sbuff_t *out, xlat_exp_t const *head)
 			FR_SBUFF_IN_CHAR_RETURN(out, ':');
 
 			if (node->child) {
-				slen = xlat_print(out, node->child);
+				slen = xlat_print(out, node->child, &xlat_escape);
 				if (slen < 0) goto error;
 			}
 			break;
 
 		case XLAT_ALTERNATE:
-			slen = xlat_print(out, node->child);
+			slen = xlat_print(out, node->child, &xlat_escape);
 			if (slen < 0) goto error;
 
 			FR_SBUFF_IN_STRCPY_LITERAL_RETURN(out, ":-");
-			slen = xlat_print(out, node->alternate);
+			slen = xlat_print(out, node->alternate, &xlat_escape);
 			if (slen < 0) goto error;
 			break;
 
@@ -1021,7 +1052,7 @@ ssize_t xlat_print(fr_sbuff_t *out, xlat_exp_t const *head)
 		case XLAT_INVALID:
 		case XLAT_LITERAL:
 		case XLAT_ONE_LETTER:
-		case XLAT_CHILD:
+		case XLAT_GROUP:
 			fr_assert_fail(NULL);
 			break;
 		}
@@ -1030,7 +1061,7 @@ ssize_t xlat_print(fr_sbuff_t *out, xlat_exp_t const *head)
 		node = node->next;
 	}
 
-	return fr_sbuff_used(out) - at_in;
+	return fr_sbuff_used_total(out) - at_in;
 }
 
 /** Tokenize an xlat expansion at runtime
@@ -1139,22 +1170,23 @@ ssize_t xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *fla
 	fr_cursor_init(&cursor, head);
 	while (!!fr_sbuff_extend(&our_in)) {
 		xlat_exp_t	*node = NULL;
-		fr_token_t	type;
+		fr_token_t	quote;
 		char		*fmt;
 		size_t		len;
 
 		fr_sbuff_set(&m, &our_in);	/* Record start of argument */
 
-		fr_sbuff_out_by_longest_prefix(&slen, &type, xlat_quote_table, &our_in, T_BARE_WORD);
+		fr_sbuff_out_by_longest_prefix(&slen, &quote, xlat_quote_table, &our_in, T_BARE_WORD);
 
 		/*
 		 *	Alloc a new node to hold the child nodes
 		 *	that make up the argument.
 		 */
 		node = xlat_exp_alloc_null(ctx);
-		xlat_exp_set_type(node, XLAT_CHILD);
+		xlat_exp_set_type(node, XLAT_GROUP);
+		node->quote = quote;
 
-		switch (type) {
+		switch (quote) {
 		/*
 		 *	Barewords --may-contain=%{expansions}
 		 */
@@ -1215,7 +1247,7 @@ ssize_t xlat_tokenize_argv(TALLOC_CTX *ctx, xlat_exp_t **head, xlat_flags_t *fla
 			break;
 		}
 
-		if ((type != T_BARE_WORD) && !fr_sbuff_next_if_char(&our_in, fr_token_quote[type])) { /* Quoting */
+		if ((quote != T_BARE_WORD) && !fr_sbuff_next_if_char(&our_in, fr_token_quote[quote])) { /* Quoting */
 			fr_strerror_printf("Unterminated string");
 			fr_sbuff_set(&our_in, &m);
 			goto error;
@@ -1362,7 +1394,7 @@ int xlat_resolve(xlat_exp_t **head, xlat_flags_t *flags, bool allow_unresolved)
 		if (!node->flags.needs_resolving) continue;	/* This node and non of its children need resolving */
 
 		switch (node->type) {
-		case XLAT_CHILD:
+		case XLAT_GROUP:
 			return xlat_resolve(&node->child, &node->flags, allow_unresolved);
 
 		/*

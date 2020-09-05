@@ -327,13 +327,15 @@ int paircmp_pairs(UNUSED REQUEST *request, VALUE_PAIR *check, VALUE_PAIR *vp)
 		if (check->vp_type == FR_TYPE_STRING) {
 			expr_p = check->vp_strvalue;
 		} else {
-			expr_p = expr = fr_pair_value_asprint(check, check, '\0');
+			fr_value_box_aprint(check, &expr, &check->data, NULL);
+			expr_p = expr;
 		}
 
 		if (vp->vp_type == FR_TYPE_STRING) {
 			value_p = vp->vp_strvalue;
 		} else {
-			value_p = value = fr_pair_value_asprint(vp, vp, '\0');
+			fr_value_box_aprint(vp, &value, &vp->data, NULL);
+			value_p = value;
 		}
 
 		if (!expr_p || !value_p) {

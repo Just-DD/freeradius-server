@@ -107,41 +107,6 @@ static inline CC_HINT(always_inline) ssize_t safecpy(char *o_start, char *o_end,
 	return (i_len);
 }
 
-/** Copy function that only allows non-overlapping memory ranges to be copied
- *
- * This should be used in printing functions which may write more data
- * than was originally present in the buffer.
- *
- * @param[out] o_start		start of output buffer.
- * @param[in] o_end		end of the output buffer.
- * @param[in] i_start		start of the input buffer.
- * @param[in] i_end		end of data to copy.
- * @return
- *	- >0 the number of bytes copied.
- *      - 0 invalid args.
- *      - <0 the number of bytes we'd need to complete the copy.
- */
-static inline CC_HINT(always_inline) ssize_t safecpy_no_overlap(char *o_start, char *o_end,
-								char const *i_start, char const *i_end)
-{
-	ssize_t	diff;
-	size_t	i_len = i_end - i_start;
-
-	if (unlikely((o_end < o_start) || (i_end < i_start))) return 0;	/* sanity check */
-
-	diff = (o_end - o_start) - (i_len);
-	if (diff < 0) return diff;
-
-	if (likely((i_start > o_end) || (i_end < o_start))) {	/* no-overlap */
-		memcpy(o_start,  i_start, i_len);
-	} else {
-		fr_strerror_printf("Address overlap %p-%p with %p-%p", o_start, o_end, i_start, i_end);	/* overlap */
-		return 0;
-	}
-
-	return (i_len);
-}
-
 /** Update all markers and pointers in the set of sbuffs to point to new_buff
  *
  * This function should be used if the underlying buffer is realloced.
@@ -1291,7 +1256,7 @@ ssize_t fr_sbuff_in_strcpy(fr_sbuff_t *sbuff, char const *str)
 	len = strlen(str);
 	FR_SBUFF_EXTEND_LOWAT_OR_RETURN(sbuff, len);
 
-	safecpy_no_overlap(sbuff->p, sbuff->end, str, str + len);
+	safecpy(sbuff->p, sbuff->end, str, str + len);
 	sbuff->p[len] = '\0';
 
 	return fr_sbuff_advance(sbuff, len);
@@ -1314,7 +1279,7 @@ ssize_t fr_sbuff_in_bstrncpy(fr_sbuff_t *sbuff, char const *str, size_t len)
 
 	FR_SBUFF_EXTEND_LOWAT_OR_RETURN(sbuff, len);
 
-	safecpy_no_overlap(sbuff->p, sbuff->end, str, str + len);
+	safecpy(sbuff->p, sbuff->end, str, str + len);
 	sbuff->p[len] = '\0';
 
 	return fr_sbuff_advance(sbuff, len);
@@ -1340,7 +1305,7 @@ ssize_t fr_sbuff_in_bstrcpy_buffer(fr_sbuff_t *sbuff, char const *str)
 
 	FR_SBUFF_EXTEND_LOWAT_OR_RETURN(sbuff, len);
 
-	safecpy_no_overlap(sbuff->p, sbuff->end, str, str + len);
+	safecpy(sbuff->p, sbuff->end, str, str + len);
 	sbuff->p[len] = '\0';
 
 	return fr_sbuff_advance(sbuff, len);

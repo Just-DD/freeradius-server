@@ -1278,8 +1278,7 @@ ssize_t regex_flags_parse(int *err, fr_regex_flags_t *out, fr_sbuff_t *in,
 
 /** Print the flags
  *
- * @param[out] out	where to write flags.
- * @param[in] outlen	Space in output buffer.
+ * @param[out] sbuff	where to write flags.
  * @param[in] flags	to print.
  * @return
  *	- The number of bytes written to the out buffer.

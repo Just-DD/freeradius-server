@@ -171,7 +171,7 @@ static rlm_rcode_t cache_merge(rlm_cache_t const *inst, REQUEST *request, rlm_ca
 		if (map_to_request(request, map, map_to_vp, NULL) < 0) {
 			char buffer[1024];
 
-			map_snprint(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map);
+			map_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map);
 			REXDENT();
 			RDEBUG2("Skipping %s", buffer);
 			RINDENT();
@@ -841,7 +841,7 @@ static ssize_t cache_xlat(TALLOC_CTX *ctx, char **out, UNUSED size_t freespace,
 		if ((tmpl_da(map->lhs) != tmpl_da(target)) ||
 		    (tmpl_list(map->lhs) != tmpl_list(target))) continue;
 
-		*out = fr_value_box_asprint(request, tmpl_value(map->rhs), '\0');
+		fr_value_box_aprint(request, out, tmpl_value(map->rhs), NULL);
 		ret = talloc_array_length(*out) - 1;
 		break;
 	}

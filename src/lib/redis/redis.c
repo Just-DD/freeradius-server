@@ -363,7 +363,7 @@ int fr_redis_tuple_from_map(TALLOC_CTX *pool, char const *out[], size_t out_len[
 	fr_assert(tmpl_is_attr(map->lhs));
 	fr_assert(tmpl_is_data(map->rhs));
 
-	slen = tmpl_print(&FR_SBUFF_OUT(key_buf, sizeof(key_buf)), map->lhs);
+	slen = tmpl_print(&FR_SBUFF_OUT(key_buf, sizeof(key_buf)), map->lhs, TMPL_ATTR_REF_PREFIX_NO, NULL);
 	if (slen < 0) {
 		fr_strerror_printf("Key too long.  Must be < " STRINGIFY(sizeof(key_buf)) " "
 				   "bytes, got %zu bytes", (size_t)(slen * -1));
@@ -384,7 +384,7 @@ int fr_redis_tuple_from_map(TALLOC_CTX *pool, char const *out[], size_t out_len[
 	 *	For everything else we get the string representation
 	 */
 	default:
-		new = fr_value_box_asprint(pool, tmpl_value(map->rhs), '\0');
+		fr_value_box_aprint(pool, &new, tmpl_value(map->rhs), NULL);
 		if (!new) {
 			talloc_free(key);
 			return -1;

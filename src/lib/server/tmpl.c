@@ -97,6 +97,98 @@ static fr_table_num_sorted_t const attr_num_table[] = {
 };
 static size_t attr_num_table_len = NUM_ELEMENTS(attr_num_table);
 
+void tmpl_attr_debug(tmpl_t const *vpt)
+{
+	tmpl_attr_t		*ar = NULL;
+	tmpl_request_t		*rr = NULL;
+	unsigned int		i = 0;
+	char			buffer[sizeof(STRINGIFY(INT16_MAX)) + 1];
+
+	switch (vpt->type) {
+	case TMPL_TYPE_ATTR:
+	case TMPL_TYPE_ATTR_UNRESOLVED:
+	case TMPL_TYPE_LIST:
+		break;
+
+	default:
+		INFO("%s can't print tmpls of type %s", __FUNCTION__,
+		     fr_table_str_by_value(tmpl_type_table, vpt->type, "<INVALID>"));
+		return;
+	}
+
+	INFO("tmpl_t %s (%.8x) \"%pV\" (%p)",
+	     fr_table_str_by_value(tmpl_type_table, vpt->type, "<INVALID>"),
+	     vpt->type,
+	     fr_box_strvalue_len(vpt->name, vpt->len), vpt);
+
+	INFO("\tquote  : %s", fr_table_str_by_value(fr_token_quotes_table, vpt->quote, "<INVALID>"));
+
+	INFO("request references:");
+
+	/*
+	 *	Print all the request references
+	 */
+	while ((rr = fr_dlist_next(&vpt->data.attribute.rr, rr))) {
+		INFO("\t[%u] %s (%u)", i,
+		     fr_table_str_by_value(request_ref_table, rr->request, "<INVALID>"), rr->request);
+		i++;
+	}
+	i = 0;
+
+	INFO("list: %s", fr_table_str_by_value(pair_list_table, vpt->data.attribute.list, "<INVALID>"));
+
+	INFO("attribute references:");
+	/*
+	 *	Print all the attribute references
+	 */
+	while ((ar = fr_dlist_next(&vpt->data.attribute.ar, ar))) {
+		snprintf(buffer, sizeof(buffer), "%i", ar->num);
+
+		switch (ar->type) {
+		case TMPL_ATTR_TYPE_NORMAL:
+		case TMPL_ATTR_TYPE_UNKNOWN:
+			if (!ar->da) {
+				INFO("\t[%u] null%s%s%s",
+				     i,
+				     ar->num != NUM_ANY ? "[" : "",
+			     	     ar->num != NUM_ANY ? fr_table_str_by_value(attr_num_table, ar->num, buffer) : "",
+			     	     ar->num != NUM_ANY ? "]" : "");
+				goto next;
+			}
+
+			INFO("\t[%u] %s %s%s%s%s (%u)",
+			     i,
+			     fr_table_str_by_value(fr_value_box_type_table, ar->da->type, "<INVALID>"),
+			     ar->da->name,
+			     ar->num != NUM_ANY ? "[" : "",
+			     ar->num != NUM_ANY ? fr_table_str_by_value(attr_num_table, ar->num, buffer) : "",
+			     ar->num != NUM_ANY ? "]" : "",
+			     ar->da->attr
+			);
+			if (ar->da->parent) INFO("\t    parent     : %s", ar->da->parent->name);
+			INFO("\t    is_raw     : %pV", fr_box_bool(ar->da->flags.is_raw));
+			INFO("\t    is_unknown : %pV", fr_box_bool(ar->da->flags.is_unknown));
+			break;
+
+
+		case TMPL_ATTR_TYPE_UNRESOLVED:
+			INFO("\t[%u] %s%s%s%s - unresolved",
+			     i, ar->unknown.name,
+			     ar->num != NUM_ANY ? "[" : "",
+			     ar->num != NUM_ANY ? fr_table_str_by_value(attr_num_table, ar->num, buffer) : "",
+			     ar->num != NUM_ANY ? "]" : "");
+			break;
+
+		default:
+			INFO("\t[%u] Bad type %u", i, ar->type);
+			break;
+		}
+
+	next:
+		i++;
+	}
+}
+
 void tmpl_debug(tmpl_t const *vpt)
 {
 	switch (vpt->type) {
@@ -110,7 +202,7 @@ void tmpl_debug(tmpl_t const *vpt)
 		break;
 	}
 
-	INFO("tmpl_t %s (%.8x) \"%pV\" (%p)",
+	INFO("tmpl_t %s (%.8x) \"%pR\" (%p)",
 	     fr_table_str_by_value(tmpl_type_table, vpt->type, "<INVALID>"),
 	     vpt->type,
 	     fr_box_strvalue_len(vpt->name, vpt->len), vpt);
@@ -126,6 +218,8 @@ void tmpl_debug(tmpl_t const *vpt)
 		INFO("\tlen        : %zu", tmpl_value_length(vpt));
 		INFO("\tvalue      : %pV", tmpl_value(vpt));
 
+		if (tmpl_value_enumv(vpt)) INFO("\tenumv      : %s (%p)",
+						tmpl_value_enumv(vpt)->name, tmpl_value_enumv(vpt));
 		return;
 
 	case TMPL_TYPE_XLAT:
@@ -134,9 +228,9 @@ void tmpl_debug(tmpl_t const *vpt)
 	{
 		char *str;
 
-		xlat_aprint(NULL, &str, tmpl_xlat(vpt));
+		xlat_aprint(NULL, &str, tmpl_xlat(vpt), NULL);
 
-		INFO("\texpansion  : %pV", fr_box_strvalue_buffer(str));
+		INFO("\texpansion  : %pR", fr_box_strvalue_buffer(str));
 
 		talloc_free(str);
 	}
@@ -144,13 +238,13 @@ void tmpl_debug(tmpl_t const *vpt)
 
 	case TMPL_TYPE_REGEX:
 	{
-		INFO("\tpattern    : %pV", fr_box_strvalue_len(vpt->name, vpt->len));
+		INFO("\tpattern    : %pR", fr_box_strvalue_len(vpt->name, vpt->len));
 	}
 		break;
 
 	default:
 		if (vpt->type & TMPL_FLAG_UNRESOLVED) {
-			INFO("\tunresolved : %pV", fr_box_strvalue_len(vpt->name, vpt->len));
+			INFO("\tunresolved : %pR", fr_box_strvalue_len(vpt->name, vpt->len));
 			INFO("\tlen        : %zu", vpt->len);
 		} else {
 			INFO("debug nyi");
@@ -483,8 +577,9 @@ static inline CC_HINT(always_inline) void tmpl_type_init(tmpl_t *vpt, tmpl_type_
 		fr_assert(0);
 		return;
 #endif
+
 	case TMPL_TYPE_ATTR:
-	case TMPL_ATTR_TYPE_UNRESOLVED:
+	case TMPL_TYPE_ATTR_UNRESOLVED:
 	case TMPL_TYPE_LIST:
 		fr_dlist_talloc_init(&vpt->data.attribute.ar, tmpl_attr_t, entry);
 		fr_dlist_talloc_init(&vpt->data.attribute.rr, tmpl_request_t, entry);
@@ -641,7 +736,8 @@ static inline CC_HINT(always_inline) tmpl_t *tmpl_alloc_null(TALLOC_CTX *ctx)
 	 *      one attribute reference and one request
 	 *	reference.
 	 */
-	MEM(vpt = talloc_zero_pooled_object(ctx, tmpl_t, 2, sizeof(tmpl_request_t) + sizeof(tmpl_attr_t)));
+	MEM(vpt = talloc_pooled_object(ctx, tmpl_t, 2, sizeof(tmpl_request_t) + sizeof(tmpl_attr_t)));
+	vpt->type = TMPL_TYPE_UNINITIALISED;
 
 	return vpt;
 }
@@ -733,13 +829,15 @@ static tmpl_attr_t *tmpl_ar_add(tmpl_t *vpt, tmpl_attr_type_t type)
  */
 int tmpl_afrom_value_box(TALLOC_CTX *ctx, tmpl_t **out, fr_value_box_t *data, bool steal)
 {
-	char const *name;
-	tmpl_t *vpt;
+	char		*name;
+	size_t		len;
+	tmpl_t		*vpt;
+	fr_token_t	quote = (data->type == FR_TYPE_STRING) ? T_SINGLE_QUOTED_STRING : T_BARE_WORD;
 
-	vpt = tmpl_alloc_null(ctx);
-	name = fr_value_box_asprint(vpt, data, '\0');
-	tmpl_init_shallow(vpt, TMPL_TYPE_DATA, (data->type == FR_TYPE_STRING) ? T_SINGLE_QUOTED_STRING : T_BARE_WORD,
-			  name, talloc_array_length(name) - 1);
+	MEM(vpt = talloc(ctx, tmpl_t));
+	len = fr_value_box_aprint(vpt, &name, data, fr_value_escape_by_quote[quote]);
+	tmpl_init_shallow(vpt, TMPL_TYPE_DATA, quote, name, len);
+
 	if (steal) {
 		if (fr_value_box_steal(vpt, tmpl_value(vpt), data) < 0) {
 			talloc_free(vpt);
@@ -754,97 +852,6 @@ int tmpl_afrom_value_box(TALLOC_CTX *ctx, tmpl_t **out, fr_value_box_t *data, bo
 	*out = vpt;
 
 	return 0;
-}
-
-void tmpl_attr_debug(tmpl_t const *vpt)
-{
-	tmpl_attr_t		*ar = NULL;
-	tmpl_request_t	*rr = NULL;
-	unsigned int		i = 0;
-	char			buffer[sizeof(STRINGIFY(INT16_MAX)) + 1];
-
-	switch (vpt->type) {
-	case TMPL_TYPE_ATTR:
-	case TMPL_TYPE_ATTR_UNRESOLVED:
-	case TMPL_TYPE_LIST:
-		break;
-
-	default:
-		INFO("%s can't print tmpls of type %s", __FUNCTION__,
-		     fr_table_str_by_value(tmpl_type_table, vpt->type, "<INVALID>"));
-		return;
-	}
-
-	INFO("tmpl_t %s \"%pV\" (%p)",
-	     fr_table_str_by_value(tmpl_type_table, vpt->type, "<INVALID>"),
-	     fr_box_strvalue_len(vpt->name, vpt->len), vpt);
-
-	INFO("\tquote  : %s", fr_table_str_by_value(fr_token_quotes_table, vpt->quote, "<INVALID>"));
-
-	INFO("request references:");
-
-	/*
-	 *	Print all the request references
-	 */
-	while ((rr = fr_dlist_next(&vpt->data.attribute.rr, rr))) {
-		INFO("\t[%u] %s (%u)", i,
-		     fr_table_str_by_value(request_ref_table, rr->request, "<INVALID>"), rr->request);
-		i++;
-	}
-	i = 0;
-
-	INFO("list: %s", fr_table_str_by_value(pair_list_table, vpt->data.attribute.list, "<INVALID>"));
-
-	INFO("attribute references:");
-	/*
-	 *	Print all the attribute references
-	 */
-	while ((ar = fr_dlist_next(&vpt->data.attribute.ar, ar))) {
-		snprintf(buffer, sizeof(buffer), "%i", ar->num);
-
-		switch (ar->type) {
-		case TMPL_ATTR_TYPE_NORMAL:
-		case TMPL_ATTR_TYPE_UNKNOWN:
-			if (!ar->da) {
-				INFO("\t[%u] null%s%s%s",
-				     i,
-				     ar->num != NUM_ANY ? "[" : "",
-			     	     ar->num != NUM_ANY ? fr_table_str_by_value(attr_num_table, ar->num, buffer) : "",
-			     	     ar->num != NUM_ANY ? "]" : "");
-				goto next;
-			}
-
-			INFO("\t[%u] %s %s%s%s%s (%u)",
-			     i,
-			     fr_table_str_by_value(fr_value_box_type_table, ar->da->type, "<INVALID>"),
-			     ar->da->name,
-			     ar->num != NUM_ANY ? "[" : "",
-			     ar->num != NUM_ANY ? fr_table_str_by_value(attr_num_table, ar->num, buffer) : "",
-			     ar->num != NUM_ANY ? "]" : "",
-			     ar->da->attr
-			);
-			if (ar->da->parent) INFO("\t    parent     : %s", ar->da->parent->name);
-			INFO("\t    is_raw     : %pV", fr_box_bool(ar->da->flags.is_raw));
-			INFO("\t    is_unknown : %pV", fr_box_bool(ar->da->flags.is_unknown));
-			break;
-
-
-		case TMPL_ATTR_TYPE_UNRESOLVED:
-			INFO("\t[%u] %s%s%s%s - unresolved",
-			     i, ar->unknown.name,
-			     ar->num != NUM_ANY ? "[" : "",
-			     ar->num != NUM_ANY ? fr_table_str_by_value(attr_num_table, ar->num, buffer) : "",
-			     ar->num != NUM_ANY ? "]" : "");
-			break;
-
-		default:
-			INFO("\t[%u] Bad type %u", i, ar->type);
-			break;
-		}
-
-	next:
-		i++;
-	}
 }
 
 /** Copy a list of attribute and request references from one tmpl to another
@@ -1097,7 +1104,8 @@ int tmpl_attr_afrom_list(TALLOC_CTX *ctx, tmpl_t **out, tmpl_t const *list, fr_d
 	 *	We need to rebuild the attribute name, to be the
 	 *	one we copied from the source list.
 	 */
-	slen = tmpl_print(&FR_SBUFF_OUT(attr, sizeof(attr)), vpt);
+	slen = tmpl_print(&FR_SBUFF_OUT(attr, sizeof(attr)), vpt, TMPL_ATTR_REF_PREFIX_YES,
+			  fr_value_escape_by_quote[list->quote]);
 	if (slen < 0) {
 		fr_strerror_printf("Serialized attribute too long.  Must be < "
 				   STRINGIFY(sizeof(attr)) " bytes, got %zu bytes", (size_t)-slen);
@@ -1142,19 +1150,19 @@ fr_sbuff_parse_rules_t const tmpl_parse_rules_bareword_unquoted = {
 };
 
 fr_sbuff_parse_rules_t const tmpl_parse_rules_double_unquoted = {
-	.escapes = &fr_value_escape_double
+	.escapes = &fr_value_unescape_double
 };
 
 fr_sbuff_parse_rules_t const tmpl_parse_rules_single_unquoted = {
-	.escapes = &fr_value_escape_single
+	.escapes = &fr_value_unescape_single
 };
 
 fr_sbuff_parse_rules_t const tmpl_parse_rules_solidus_unquoted = {
-	.escapes = &fr_value_escape_solidus
+	.escapes = &fr_value_unescape_solidus
 };
 
 fr_sbuff_parse_rules_t const tmpl_parse_rules_backtick_unquoted = {
-	.escapes = &fr_value_escape_backtick
+	.escapes = &fr_value_unescape_backtick
 };
 
 /** Parse rules for non-quoted strings
@@ -1196,22 +1204,22 @@ fr_sbuff_parse_rules_t const tmpl_parse_rules_bareword_quoted = {
 };
 
 fr_sbuff_parse_rules_t const tmpl_parse_rules_double_quoted = {
-	.escapes = &fr_value_escape_double,
+	.escapes = &fr_value_unescape_double,
 	.terminals = &FR_SBUFF_TERM("\"")
 };
 
 fr_sbuff_parse_rules_t const tmpl_parse_rules_single_quoted = {
-	.escapes = &fr_value_escape_single,
+	.escapes = &fr_value_unescape_single,
 	.terminals = &FR_SBUFF_TERM("'")
 };
 
 fr_sbuff_parse_rules_t const tmpl_parse_rules_solidus_quoted = {
-	.escapes = &fr_value_escape_solidus,
+	.escapes = &fr_value_unescape_solidus,
 	.terminals = &FR_SBUFF_TERM("/")
 };
 
 fr_sbuff_parse_rules_t const tmpl_parse_rules_backtick_quoted = {
-	.escapes = &fr_value_escape_backtick,
+	.escapes = &fr_value_unescape_backtick,
 	.terminals = &FR_SBUFF_TERM("`")
 };
 
@@ -1868,9 +1876,10 @@ ssize_t tmpl_afrom_attr_substr(TALLOC_CTX *ctx, attr_ref_error_t *err,
 {
 	int		ret;
 	size_t		list_len;
-	tmpl_t	*vpt;
+	tmpl_t		*vpt;
 	fr_sbuff_t	our_name = FR_SBUFF_NO_ADVANCE(name);	/* Take a local copy in case we need to back track */
 	bool		is_raw = false;
+	bool		ref_prefix = false;
 
 	if (!ar_rules) ar_rules = &default_attr_ref_rules;	/* Use the defaults */
 	if (!p_rules) p_rules = &tmpl_parse_rules_bareword_quoted;
@@ -1893,6 +1902,7 @@ ssize_t tmpl_afrom_attr_substr(TALLOC_CTX *ctx, attr_ref_error_t *err,
 			if (err) *err = ATTR_REF_ERROR_BAD_PREFIX;
 			FR_SBUFF_ERROR_RETURN(&our_name);
 		}
+
 		break;
 
 	case TMPL_ATTR_REF_PREFIX_NO:
@@ -1909,6 +1919,7 @@ ssize_t tmpl_afrom_attr_substr(TALLOC_CTX *ctx, attr_ref_error_t *err,
 	}
 
 	MEM(vpt = tmpl_alloc(ctx, TMPL_TYPE_ATTR, T_BARE_WORD, NULL, 0));
+	vpt->data.attribute.ref_prefix = ref_prefix;
 
 	/*
 	 *	For backwards compatibility strip off "Attr-"
@@ -2166,12 +2177,12 @@ static ssize_t tmpl_afrom_ipv4_substr(TALLOC_CTX *ctx, tmpl_t **out, fr_sbuff_t 
 	 */
 	if (fr_sbuff_next_if_char(&our_in, '/')) {
 		if (!fr_sbuff_out(NULL, &octet, &our_in)) {
-			fr_strerror_printf("IPv6 CIDR mask malformed");
+			fr_strerror_printf("IPv4 CIDR mask malformed");
 			goto error;
 		}
 
 		if (octet > 32) {
-			fr_strerror_printf("IPv6 CIDR mask too high");
+			fr_strerror_printf("IPv4 CIDR mask too high");
 			goto error;
 		}
 
@@ -2426,7 +2437,6 @@ ssize_t tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 	fr_sbuff_t	our_in = FR_SBUFF_NO_ADVANCE(in);
 
 	ssize_t		slen;
-	size_t		len;
 	char		*str;
 
 	tmpl_t		*vpt = NULL;
@@ -2460,12 +2470,13 @@ ssize_t tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 
 			if (flags.needs_resolving) type |= TMPL_FLAG_UNRESOLVED;
 
-			xlat_aprint(vpt, &str, head);
-			tmpl_init_shallow(vpt, type, quote, str, talloc_array_length(str) - 1);
+			tmpl_init(vpt, type, quote, fr_sbuff_start(&our_in), slen);
 			vpt->data.xlat.ex = head;
 			vpt->data.xlat.flags = flags;
 
 			*out = vpt;
+
+			TMPL_VERIFY(vpt);
 
 			return fr_sbuff_set(in, &our_in);
 		}
@@ -2476,6 +2487,8 @@ ssize_t tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 		slen = tmpl_afrom_bool_substr(ctx, out, &our_in, p_rules);
 		if (slen > 0) {
 		done_bareword:
+			TMPL_VERIFY(*out);
+
 			return fr_sbuff_set(in, &our_in);
 		}
 
@@ -2520,21 +2533,23 @@ ssize_t tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 		 *	of bareword, assume it's an enum
 		 *	value.
 		 */
-		len = fr_sbuff_out_aunescape_until(vpt, &str, &our_in, SIZE_MAX, p_rules->terminals, p_rules->escapes);
-		if (len == 0) {
+		slen = fr_sbuff_out_aunescape_until(vpt, &str, &our_in, SIZE_MAX, p_rules->terminals, p_rules->escapes);
+		if (slen == 0) {
 			fr_strerror_printf("Empty bareword is invalid");
 			return 0;
 		}
 
-		vpt = tmpl_alloc(ctx, TMPL_TYPE_UNRESOLVED, T_BARE_WORD, str, talloc_array_length(str) - 1);
+		vpt = tmpl_alloc(ctx, TMPL_TYPE_UNRESOLVED, T_BARE_WORD, fr_sbuff_start(&our_in), slen);
+		vpt->data.unescaped = str;
 		*out = vpt;
 
 		return fr_sbuff_set(in, &our_in);
 
 	case T_SINGLE_QUOTED_STRING:
 		vpt = tmpl_alloc_null(ctx);
-		fr_sbuff_out_aunescape_until(vpt, &str, &our_in, SIZE_MAX, p_rules->terminals, p_rules->escapes);
-		tmpl_init_shallow(vpt, TMPL_TYPE_UNRESOLVED, quote, str, talloc_array_length(str) - 1);
+		slen = fr_sbuff_out_aunescape_until(vpt, &str, &our_in, SIZE_MAX, p_rules->terminals, p_rules->escapes);
+		tmpl_init(vpt, TMPL_TYPE_UNRESOLVED, quote, fr_sbuff_start(&our_in), slen);
+		vpt->data.unescaped = str;
 		break;
 
 	case T_DOUBLE_QUOTED_STRING:
@@ -2549,49 +2564,36 @@ ssize_t tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 		if (!head) return slen;
 
 		/*
-		 *	Check if the string actually contains an xlat
-		 *	If it does store the compiled xlat.
+		 *	If the string doesn't contain an xlat, just
+		 *	convert the xlat expansion into an unescaped
+		 *	literal for parsing later.
 		 */
-		if (!xlat_to_literal(vpt, &str, &head)) {
+		if (xlat_to_literal(vpt, &str, &head)) {
+			tmpl_init(vpt, TMPL_TYPE_UNRESOLVED, quote, fr_sbuff_start(&our_in), slen);
+			vpt->data.unescaped = str;	/* Store the unescaped string for parsing later */
+
+		/*
+		 *	If the string actually contains an xlat
+		 *	store the compiled xlat.
+		 */
+		} else {
 			tmpl_type_t	type = TMPL_TYPE_XLAT;
 
 			if (flags.needs_resolving) type |= TMPL_FLAG_UNRESOLVED;
 
-			/*
-			 *	Fixme - we should leave the name blank and print
-			 *	the xlat in the tmpl print function.
-			 *
-			 *	xlat print needs to be fixed up to use the actual
-			 *	fr_sbuff_parse_rules_t used to create the xlat
-			 *	tree.
-			 */
-			xlat_aprint(vpt, &str, head);
-			tmpl_init_shallow(vpt, type, quote, str, talloc_array_length(str) - 1);
-
+			tmpl_init(vpt, type, quote, fr_sbuff_start(&our_in), slen);
 			vpt->data.xlat.ex = head;
 			vpt->data.xlat.flags = flags;
-		/*
-		 *	If it doesn't, free the xlat node after duplicating
-		 *	its format string, and just treat the tmpl as unresolved.
-		 */
-		} else {
-			/*
-			 *	It doesn't, so dup the unescaped string and set
-			 *	it as the name of the tmpl.
-			 */
-			tmpl_init_shallow(vpt, TMPL_TYPE_UNRESOLVED, quote, str, talloc_array_length(str) - 1);
 		}
 	}
 		break;
 
 	case T_BACK_QUOTED_STRING:
 	{
-		fr_sbuff_marker_t	m;
 		tmpl_type_t		type = TMPL_TYPE_EXEC;
 		xlat_exp_t		*head = NULL;
 		xlat_flags_t		flags = {};
 
-		fr_sbuff_marker(&m, &our_in);
 		vpt = tmpl_alloc_null(ctx);
 
 		/*
@@ -2608,13 +2610,9 @@ ssize_t tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 
 		if (flags.needs_resolving) type |= TMPL_FLAG_UNRESOLVED;
 
-		str = talloc_bstrndup(vpt, fr_sbuff_current(&m), fr_sbuff_behind(&m));
-		tmpl_init_shallow(vpt, type, quote, str, talloc_array_length(str) - 1);
-
+		tmpl_init(vpt, type, quote, fr_sbuff_start(&our_in), slen);
 		vpt->data.xlat.ex = head;
 		vpt->data.xlat.flags = flags;
-
-		fr_sbuff_marker_release(&m);
 	}
 		break;
 
@@ -2639,8 +2637,8 @@ ssize_t tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 		 *	be pre-compiled.
 		 */
 		if (xlat_to_literal(vpt, &str, &head)) {
-			tmpl_init_shallow(vpt, TMPL_TYPE_REGEX_UNCOMPILED, quote, str,
-					  talloc_array_length(str) - 1);
+			tmpl_init(vpt, TMPL_TYPE_REGEX_UNCOMPILED, quote, fr_sbuff_start(&our_in), slen);
+			vpt->data.unescaped = str;	/* Store the unescaped string for compilation later */
 		/*
 		 *	...If it doesn't, we unfortunately still
 		 *	can't compile it here, as we don't know if it
@@ -2651,19 +2649,9 @@ ssize_t tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 		 *	after we return.
 		 */
 		} else {
-			/*
-			 *	Fixme - we should leave the name blank and print
-			 *	the xlat in the tmpl print function.
-			 *
-			 *	xlat print needs to be fixed up to use the actual
-			 *	fr_sbuff_parse_rules_t used to create the xlat
-			 *	tree.
-			 */
-			xlat_aprint(vpt, &str, head);
-
 			if (flags.needs_resolving) type |= TMPL_FLAG_UNRESOLVED;
-			tmpl_init_shallow(vpt, TMPL_TYPE_REGEX_XLAT, quote, str, talloc_array_length(str) - 1);
 
+			tmpl_init_shallow(vpt, type, quote, fr_sbuff_start(&our_in), slen);
 			vpt->data.xlat.ex = head;
 			vpt->data.xlat.flags = flags;
 		}
@@ -2683,14 +2671,15 @@ ssize_t tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 
 /** Parse a cast specifier
  *
- * @param[out] out		Where to write the cast type.
- *				Will default to FR_TYPE_INVALID.
+ * @param[out] out	Where to write the cast type.
+ *			Will default to FR_TYPE_INVALID.
+ * @param[in] in	String containing the cast marker.
  * @return
  *	- 0 no cast specifier found.
  *	- >0 the number of bytes parsed.
  *	- <0 offset of parse error.
  */
-ssize_t tmpl_cast_substr(fr_type_t *out, fr_sbuff_t *in)
+ssize_t tmpl_cast_from_substr(fr_type_t *out, fr_sbuff_t *in)
 {
 	fr_sbuff_t		our_in = FR_SBUFF_NO_ADVANCE(in);
 	fr_sbuff_marker_t	m;
@@ -2719,6 +2708,26 @@ ssize_t tmpl_cast_substr(fr_type_t *out, fr_sbuff_t *in)
 	return fr_sbuff_set(in, &our_in);
 }
 
+/** Set a cast for a tmpl
+ *
+ * @param[in,out] vpt	to set cast for.
+ * @param[in] type	to set.
+ * @return
+ *	- 0 on success.
+ *	- -1 on failure.
+ */
+int tmpl_cast_set(tmpl_t *vpt, fr_type_t type)
+{
+	if (fr_dict_non_data_types[type]) {
+		fr_strerror_printf("Forbidden data type in cast");
+		return -1;
+	}
+
+	vpt->cast = type;
+
+	return 0;
+}
+
 #ifdef HAVE_REGEX
 /** Parse a set of regular expression flags
  *
@@ -2737,7 +2746,7 @@ ssize_t tmpl_regex_flags_substr(tmpl_t *vpt, fr_sbuff_t *in, fr_sbuff_term_t con
 
 	fr_assert(tmpl_is_regex_uncompiled(vpt) || tmpl_is_regex_xlat(vpt) || tmpl_is_regex_xlat_unresolved(vpt));
 
-	slen = regex_flags_parse(&err, &vpt->data.regex_flags, in, terminals, true);
+	slen = regex_flags_parse(&err, &vpt->data.reg.flags, in, terminals, true);
 	switch (err) {
 	case 0:
 		break;
@@ -2757,7 +2766,7 @@ ssize_t tmpl_regex_flags_substr(tmpl_t *vpt, fr_sbuff_t *in, fr_sbuff_term_t con
  * #tmpl_cast_in_place can be used to convert #TMPL_TYPE_UNRESOLVED to a #TMPL_TYPE_DATA of a
  * specified #fr_type_t.
  *
- * #tmpl_cast_substr_to_vp does the same as #tmpl_cast_in_place, but outputs a #VALUE_PAIR.
+ * #tmpl_cast_from_substr_to_vp does the same as #tmpl_cast_in_place, but outputs a #VALUE_PAIR.
  *
  * #tmpl_attr_unknown_add converts a #TMPL_TYPE_ATTR with an unknown #fr_dict_attr_t to a
  * #TMPL_TYPE_ATTR with a known #fr_dict_attr_t, by adding the unknown #fr_dict_attr_t to the main
@@ -2787,13 +2796,19 @@ int tmpl_cast_in_place(tmpl_t *vpt, fr_type_t type, fr_dict_attr_t const *enumv)
 
 	switch (vpt->type) {
 	case TMPL_TYPE_UNRESOLVED:
+	{
+		char *unescaped = vpt->data.unescaped;
+
 		/*
 		 *	Why do we pass a pointer to a temporary type
 		 *	variable? Goddamn WiMAX.
 		 */
 		if (fr_value_box_from_str(vpt, &vpt->data.literal, &type,
-					  enumv, vpt->name, vpt->len, '\0', false) < 0) return -1;
+					  enumv, unescaped, talloc_array_length(unescaped) - 1,
+					  '\0', false) < 0) return -1;
+		talloc_free(unescaped);
 		vpt->type = TMPL_TYPE_DATA;
+	}
 		break;
 
 	case TMPL_TYPE_DATA:
@@ -2809,10 +2824,18 @@ int tmpl_cast_in_place(tmpl_t *vpt, fr_type_t type, fr_dict_attr_t const *enumv)
 	}
 		break;
 
+	case TMPL_TYPE_ATTR:	/* FIXME - We should check cast compatibility with resolved attrs */
+	case TMPL_TYPE_ATTR_UNRESOLVED:
+		vpt->cast = type;
+		break;
+
 	default:
 		fr_assert(0);
 	}
 
+	/*
+	 *	Fixup quoting
+	 */
 	switch (type) {
 	case FR_TYPE_STRING:
 		switch (vpt->quote) {
@@ -2900,6 +2923,8 @@ static inline CC_HINT(always_inline) int tmpl_attr_resolve(tmpl_t *vpt)
 
 	vpt->type ^= TMPL_FLAG_UNRESOLVED;
 
+	TMPL_VERIFY(vpt);
+
 	return 0;
 }
 
@@ -2957,7 +2982,7 @@ int tmpl_resolve(tmpl_t *vpt)
 	 */
 	} else if (vpt->type == TMPL_TYPE_UNRESOLVED) {
 		fr_value_box_init_null(&vpt->data.literal);
-		fr_value_box_bstrdup_buffer_shallow(NULL, &vpt->data.literal, NULL, vpt->name, false);
+		fr_value_box_bstrdup_buffer_shallow(NULL, &vpt->data.literal, NULL, vpt->data.unescaped, false);
 		vpt->type = TMPL_TYPE_DATA;
 	}
 
@@ -3021,12 +3046,14 @@ void tmpl_unresolve(tmpl_t *vpt)
 		break;
 
 	case TMPL_TYPE_REGEX:
-		talloc_free(vpt->data.preg);
+		talloc_free(vpt->data.reg.ex);
 		break;
 
 	}
 
 	memcpy(vpt, &tmp, sizeof(*vpt));
+
+	TMPL_VERIFY(vpt);
 }
 
 /** Convert an attribute reference to an xlat expansion
@@ -3058,41 +3085,6 @@ int tmpl_attr_to_xlat(TALLOC_CTX *ctx, tmpl_t **vpt_p)
 	}
 
 	*vpt_p = vpt;
-
-	return 0;
-}
-
-/** Convert an abstract da into a concrete one
- *
- * Usually used to fixup combo ip addresses
- */
-int tmpl_attr_abstract_to_concrete(tmpl_t *vpt, fr_type_t type)
-{
-	fr_dict_attr_t const	*abstract;
-	fr_dict_attr_t const	*concrete;
-	tmpl_attr_t	*ref;
-
-	tmpl_assert_type(tmpl_is_attr(vpt));
-
-	abstract = tmpl_da(vpt);
-	if (abstract->type != FR_TYPE_COMBO_IP_ADDR) {
-		fr_strerror_printf("Abstract attribute \"%s\" is of incorrect type '%s'", abstract->name,
-				   fr_table_str_by_value(fr_value_box_type_table, abstract->type, "<INVALID>"));
-		return -1;
-	}
-
-	concrete = fr_dict_attr_by_type(abstract, type);
-	if (!concrete) {
-		fr_strerror_printf("Can't convert abstract type '%s' to concrete type '%s'",
-				   fr_table_str_by_value(fr_value_box_type_table, abstract->type, "<INVALID>"),
-				   fr_table_str_by_value(fr_value_box_type_table, type, "<INVALID>"));
-		return -1;
-	}
-
-	ref = fr_dlist_tail(&vpt->data.attribute.ar);
-	ref->da = concrete;
-
-	TMPL_ATTR_VERIFY(vpt);
 
 	return 0;
 }
@@ -3140,6 +3132,41 @@ void tmpl_attr_to_raw(tmpl_t *vpt)
 	}
 
 	TMPL_ATTR_VERIFY(vpt);
+}
+
+/** Convert an abstract da into a concrete one
+ *
+ * Usually used to fixup combo ip addresses
+ */
+int tmpl_attr_abstract_to_concrete(tmpl_t *vpt, fr_type_t type)
+{
+	fr_dict_attr_t const	*abstract;
+	fr_dict_attr_t const	*concrete;
+	tmpl_attr_t	*ref;
+
+	tmpl_assert_type(tmpl_is_attr(vpt));
+
+	abstract = tmpl_da(vpt);
+	if (abstract->type != FR_TYPE_COMBO_IP_ADDR) {
+		fr_strerror_printf("Abstract attribute \"%s\" is of incorrect type '%s'", abstract->name,
+				   fr_table_str_by_value(fr_value_box_type_table, abstract->type, "<INVALID>"));
+		return -1;
+	}
+
+	concrete = fr_dict_attr_by_type(abstract, type);
+	if (!concrete) {
+		fr_strerror_printf("Can't convert abstract type '%s' to concrete type '%s'",
+				   fr_table_str_by_value(fr_value_box_type_table, abstract->type, "<INVALID>"),
+				   fr_table_str_by_value(fr_value_box_type_table, type, "<INVALID>"));
+		return -1;
+	}
+
+	ref = fr_dlist_tail(&vpt->data.attribute.ar);
+	ref->da = concrete;
+
+	TMPL_ATTR_VERIFY(vpt);
+
+	return 0;
 }
 
 /** Add an unknown #fr_dict_attr_t specified by a #tmpl_t to the main dictionary
@@ -3235,13 +3262,17 @@ int tmpl_attr_unresolved_add(fr_dict_t *dict_def, tmpl_t *vpt,
 ssize_t tmpl_regex_compile(tmpl_t *vpt, bool subcaptures, bool runtime)
 {
 	ssize_t slen;
+	char	*unescaped = vpt->data.unescaped;
 
 	if (tmpl_is_regex_xlat(vpt) || tmpl_is_regex(vpt)) return 0;	/* Don't need compiling */
 
 	fr_assert(tmpl_is_regex_uncompiled(vpt));
 
-	slen = regex_compile(vpt, &vpt->data.preg, vpt->name, vpt->len, &vpt->data.regex_flags, subcaptures, runtime);
+	slen = regex_compile(vpt, &vpt->data.reg.ex,
+			     unescaped, talloc_array_length(unescaped) - 1,
+			     &vpt->data.reg.flags, subcaptures, runtime);
 	if (slen < 0) return slen;
+	talloc_free(unescaped);
 
 	vpt->type = TMPL_TYPE_REGEX;
 
@@ -3256,16 +3287,22 @@ ssize_t tmpl_regex_compile(tmpl_t *vpt, bool subcaptures, bool runtime)
 
 /** Print an attribute or list #tmpl_t to a string
  *
- * @note Does not print preceding '&'.
+ * This function is the direct counterpart to #fr_tmpl_afrom_attr_substr.
  *
- * @param[in] out	Where to write the presentation format #tmpl_t string.
- * @param[in] vpt	to print.
+ * @param[in] out		Where to write the presentation format #tmpl_t string.
+ * @param[in] vpt		to print.
+ * @param[in] ar_prefix		Whether to print the '&' at the beginning of attribute
+ *				references.
+ *				- TMPL_ATTR_REF_PREFIX_YES	- always print.
+ *				- TMPL_ATTR_REF_PREFIX_NO	- never print.
+ *				- TMPL_ATTR_REF_PREFIX_AUTO	- print if the original tmpl
+ *								  was prefixed.
  * @return
  *	- >0 the number of bytes written to the out buffer.
  *	- 0 invalid argument.
  *	- <0 the number of bytes we would have needed to complete the print.
  */
-ssize_t tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt)
+ssize_t tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_prefix_t ar_prefix)
 {
 	tmpl_request_t		*rr = NULL;
 	tmpl_attr_t		*ar = NULL;
@@ -3287,6 +3324,15 @@ ssize_t tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt)
 
 	default:
 		return 0;
+	}
+
+	/*
+	 *	Handle printing the request reference
+	 *	prefix.
+	 */
+	if ((ar_prefix == TMPL_ATTR_REF_PREFIX_YES) ||
+	    ((ar_prefix == TMPL_ATTR_REF_PREFIX_AUTO) && vpt->data.attribute.ref_prefix)) {
+		FR_SBUFF_IN_CHAR_RETURN(&our_out, '&');
 	}
 
 	/*
@@ -3400,16 +3446,33 @@ ssize_t tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt)
 
 /** Print a #tmpl_t to a string
  *
- * @param[out] out	Where to write the presentation format #tmpl_t string.
- * @param[in] vpt	to print.
+ * This function should primarily be used for regenerating vpt->name when the contents
+ * of the #tmpl_t is changed programatically, or when the #tmpl_t is being serialized
+ * in some non-standard way, i.e. as a value for a field in a database.
+ *
+ * This function is the direct counterpart to #fr_tmpl_afrom_substr.
+ *
+ * @note Does not print flags for regular expressions, as the quoting char is needed
+ *	 to separate the elements of the expression.
+ *	 Call regex_flags_print to write the flags values to the output buffer.
+ *
+ * @param[out] out		Where to write the presentation format #tmpl_t string.
+ * @param[in] vpt		to print.
+ * @param[in] ar_prefix		Whether to print the '&' at the beginning of attribute
+ *				references.
+ *				- TMPL_ATTR_REF_PREFIX_YES	- always print.
+ *				- TMPL_ATTR_REF_PREFIX_NO	- never print.
+ *				- TMPL_ATTR_REF_PREFIX_AUTO	- print if the original tmpl
+ *								  was prefixed.
+ * @param[in] e_rules		Escaping rules used to print strings.
  * @return
  *	- >0 the number of bytes written to the out buffer.
  *	- 0 invalid argument.
  *	- <0 the number of bytes we would have needed to complete the print.
  */
-ssize_t tmpl_print(fr_sbuff_t *out, tmpl_t const *vpt)
+ssize_t tmpl_print(fr_sbuff_t *out, tmpl_t const *vpt,
+		   tmpl_attr_ref_prefix_t ar_prefix, fr_sbuff_escape_rules_t const *e_rules)
 {
-	char		c;	/* Quoting char */
 	fr_sbuff_t	our_out = FR_SBUFF_NO_ADVANCE(out);
 
 	if (unlikely(!vpt)) return 0;
@@ -3420,70 +3483,83 @@ ssize_t tmpl_print(fr_sbuff_t *out, tmpl_t const *vpt)
 	case TMPL_TYPE_LIST:
 	case TMPL_TYPE_ATTR_UNRESOLVED:
 	case TMPL_TYPE_ATTR:
-		FR_SBUFF_IN_CHAR_RETURN(&our_out, '&');
-		FR_SBUFF_RETURN(tmpl_print_attr_str, &our_out, vpt);
-		break;
-
-	/*
-	 *	Regexes have their own set of escaping rules
-	 *
-	 *	/<regex>/<flags>
-	 */
-	case TMPL_TYPE_REGEX:
-	case TMPL_TYPE_REGEX_UNCOMPILED:
-	case TMPL_TYPE_REGEX_XLAT:
-	case TMPL_TYPE_REGEX_XLAT_UNRESOLVED:
-		FR_SBUFF_IN_CHAR_RETURN(&our_out, '/');
-		FR_SBUFF_IN_ESCAPE_RETURN(&our_out, vpt->name, vpt->len, '/');
-		FR_SBUFF_IN_CHAR_RETURN(&our_out, '/');
-		FR_SBUFF_EXTEND_LOWAT_OR_RETURN(&our_out, REGEX_FLAG_BUFF_SIZE - 1);
-		fr_sbuff_advance(&our_out,
-				 regex_flags_snprint(fr_sbuff_current(&our_out), fr_sbuff_remaining(&our_out) + 1,
-				 		     tmpl_regex_flags(vpt)));
-		break;
-
-	case TMPL_TYPE_XLAT_UNRESOLVED:
-	case TMPL_TYPE_XLAT:
-		FR_SBUFF_IN_CHAR_RETURN(&our_out, '"');
-		FR_SBUFF_IN_ESCAPE_RETURN(&our_out, vpt->name, vpt->len, '"');
-		FR_SBUFF_IN_CHAR_RETURN(&our_out, '"');
-		break;
-
-	case TMPL_TYPE_EXEC:
-	case TMPL_TYPE_EXEC_UNRESOLVED:
-		FR_SBUFF_IN_CHAR_RETURN(&our_out, '`');
-		FR_SBUFF_IN_ESCAPE_RETURN(&our_out, vpt->name, vpt->len, '`');
-		FR_SBUFF_IN_CHAR_RETURN(&our_out, '`');
-		break;
-
-	case TMPL_TYPE_UNRESOLVED:
-		c = fr_token_quote[vpt->quote];
-		if (c) FR_SBUFF_IN_CHAR_RETURN(&our_out, c);
-		FR_SBUFF_IN_ESCAPE_RETURN(&our_out, vpt->name, vpt->len, c);
-		if (c) FR_SBUFF_IN_CHAR_RETURN(&our_out, c);
+		FR_SBUFF_RETURN(tmpl_print_attr_str, &our_out, vpt, ar_prefix);
 		break;
 
 	case TMPL_TYPE_DATA:
-	{
-		char	*tmp;
+	        FR_SBUFF_RETURN(fr_value_box_print, &our_out, tmpl_value(vpt), e_rules);
+		break;
 
-		c = fr_token_quote[vpt->quote];
-		tmp = fr_value_box_asprint(NULL, tmpl_value(vpt), c);
-		if (!tmp) return 0;
-
-		if (c) FR_SBUFF_IN_CHAR_RETURN(&our_out, c);
-		FR_SBUFF_IN_BSTRCPY_BUFFER_RETURN(&our_out, tmp);
-		if (c) FR_SBUFF_IN_CHAR_RETURN(&our_out, c);
-
-		talloc_free(tmp);
-	}
+	case TMPL_TYPE_REGEX:
+		FR_SBUFF_IN_BSTRNCPY_RETURN(&our_out, vpt->name, vpt->len);	/* Fixme - double escapes */
 		break;
 
 	case TMPL_TYPE_UNINITIALISED:
 	case TMPL_TYPE_NULL:
 	case TMPL_TYPE_MAX:
 		break;
+
+	/*
+	 *	The remaining types will either
+	 *	be xlat expansions, or need
+	 *	resolving, in which case the
+	 *	unescaped string is available
+	 *	in vpt->unescaped.
+	 */
+	default:
+		if (tmpl_contains_xlat(vpt)) {
+			FR_SBUFF_RETURN(xlat_print, &our_out, tmpl_xlat(vpt), e_rules);
+			break;
+		}
+
+		if (tmpl_needs_resolving(vpt)) {
+			FR_SBUFF_IN_ESCAPE_BUFFER_RETURN(&our_out, vpt->data.unescaped, e_rules);
+			break;
+		}
+
+		fr_assert(0);
+		break;
 	}
+
+	return fr_sbuff_set(out, &our_out);
+}
+
+/** Print a #tmpl_t to a string with quotes
+ *
+ * This function should be used when the tmpl is embedded in some other construct
+ * in the server's configuration.
+ *
+ * It adds standard quoting around tmpl's used as operands in expressions and applies
+ * the correct escaping rules.
+ *
+ * @param[out] out		Where to write the presentation format #tmpl_t string.
+ * @param[in] vpt		to print.
+ * @param[in] ar_prefix		Whether to print the '&' at the beginning of attribute
+ *				references.
+ *				- TMPL_ATTR_REF_PREFIX_YES	- always print.
+ *				- TMPL_ATTR_REF_PREFIX_NO	- never print.
+ *				- TMPL_ATTR_REF_PREFIX_AUTO	- print if the original tmpl
+ *								  was prefixed.
+ * @return
+ *	- >0 the number of bytes written to the out buffer.
+ *	- 0 invalid argument.
+ *	- <0 the number of bytes we would have needed to complete the print.
+ */
+ssize_t tmpl_print_quoted(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_prefix_t ar_prefix)
+{
+	fr_sbuff_t our_out = FR_SBUFF_NO_ADVANCE(out);
+
+	char quote = fr_token_quote[vpt->quote];
+
+	if (quote != '\0') FR_SBUFF_IN_CHAR_RETURN(&our_out, quote);
+	FR_SBUFF_RETURN(tmpl_print, &our_out, vpt,
+			ar_prefix, fr_value_escape_by_quote[vpt->quote]);
+	if (quote != '\0') FR_SBUFF_IN_CHAR_RETURN(&our_out, quote);
+
+	/*
+	 *	Optionally print the flags
+	 */
+	if (vpt->type & TMPL_FLAG_REGEX) FR_SBUFF_RETURN(regex_flags_print, &our_out, tmpl_regex_flags(vpt));
 
 	return fr_sbuff_set(out, &our_out);
 }
@@ -4336,7 +4412,7 @@ int tmpl_find_or_add_vp(VALUE_PAIR **out, REQUEST *request, tmpl_t const *vpt)
  *	- Pointer to the first non-zero byte.
  *	- NULL if all bytes were zero.
  */
-static uint8_t const *not_zeroed(uint8_t const *ptr, size_t len)
+static uint8_t const *is_zeroed(uint8_t const *ptr, size_t len)
 {
 	size_t i;
 
@@ -4347,7 +4423,28 @@ static uint8_t const *not_zeroed(uint8_t const *ptr, size_t len)
 	return NULL;
 }
 
-#define CHECK_ZEROED(_vpt, _field) not_zeroed(((uint8_t const *)&(_vpt)->data) + sizeof((_vpt)->data._field), sizeof((_vpt)->data) - sizeof((_vpt)->data._field))
+/** Verify that unused regions of the struct are zeroed out
+ *
+ */
+#define CHECK_ZEROED(_vpt, _field) is_zeroed(((uint8_t const *)&(_vpt)->data) + sizeof((_vpt)->data._field), sizeof((_vpt)->data) - sizeof((_vpt)->data._field))
+
+
+/** Print hex data
+ *
+ */
+#define PRINT_NON_ZEROED(_vpt, _field, _nz_ptr) \
+do { \
+	DEBUG("Expected live portion %p-%p (0-%zu)", \
+	      _vpt, \
+	      (uint8_t const *)&(_vpt)->data + sizeof((_vpt)->data._field), \
+	      sizeof((_vpt)->data._field)); \
+	DEBUG("Expected zero portion %p-%p (%zu-%zu)", \
+	      (uint8_t const *)&(_vpt)->data + sizeof((_vpt)->data._field), \
+	      (uint8_t const *)&(_vpt)->data + sizeof((_vpt)->data), \
+	      sizeof((_vpt)->data._field), sizeof((_vpt)->data)); \
+	HEX_MARKER1((uint8_t const *)&vpt->data, sizeof(vpt->data), nz - (uint8_t const *)&vpt->data, "non-zero memory", ""); \
+} while (0)
+
 
 /** Verify the attribute reference in a tmpl_t make sense
  *
@@ -4481,7 +4578,7 @@ void tmpl_verify(char const *file, int line, tmpl_t const *vpt)
 	 */
 	switch (vpt->type) {
 	case TMPL_TYPE_NULL:
-		if ((nz = not_zeroed((uint8_t const *)&vpt->data, sizeof(vpt->data)))) {
+		if ((nz = is_zeroed((uint8_t const *)&vpt->data, sizeof(vpt->data)))) {
 			HEX_MARKER1((uint8_t const *)&vpt->data, sizeof(vpt->data),
 				    nz - (uint8_t const *)&vpt->data, "non-zero memory", "");
 			fr_fatal_assert_fail("CONSISTENCY CHECK FAILED %s[%u]: TMPL_TYPE_NULL "
@@ -4490,13 +4587,6 @@ void tmpl_verify(char const *file, int line, tmpl_t const *vpt)
 		break;
 
 	case TMPL_TYPE_UNRESOLVED:
-		if ((nz = not_zeroed((uint8_t const *)&vpt->data, sizeof(vpt->data)))) {
-			HEX_MARKER1((uint8_t const *)&vpt->data, sizeof(vpt->data),
-				    nz - (uint8_t const *)&vpt->data, "non-zero memory", "");
-
-			fr_fatal_assert_fail("CONSISTENCY CHECK FAILED %s[%u]: TMPL_TYPE_UNRESOLVED "
-					     "has non-zero bytes in its data union", file, line);
-		}
 		break;
 
 	case TMPL_TYPE_XLAT_UNRESOLVED:
@@ -4521,7 +4611,7 @@ void tmpl_verify(char const *file, int line, tmpl_t const *vpt)
 
 /* @todo When regexes get converted to xlat the flags field of the regex union is used
 	case TMPL_TYPE_XLAT_UNRESOLVED:
-		if (not_zeroed((uint8_t const *)&vpt->data, sizeof(vpt->data))) {
+		if (is_zeroed((uint8_t const *)&vpt->data, sizeof(vpt->data))) {
 			fr_fatal_assert_fail("CONSISTENCY CHECK FAILED %s[%u]: TMPL_TYPE_XLAT_UNRESOLVED "
 					     "has non-zero bytes in its data union", file, line);
 		}
@@ -4553,8 +4643,7 @@ void tmpl_verify(char const *file, int line, tmpl_t const *vpt)
 
 	case TMPL_TYPE_ATTR:
 		if ((nz = CHECK_ZEROED(vpt, attribute))) {
-			HEX_MARKER1((uint8_t const *)&vpt->data.attribute, sizeof(vpt->data.attribute),
-				    nz - (uint8_t const *)&vpt->data.attribute, "non-zero memory", "");
+			PRINT_NON_ZEROED(vpt, attribute, nz);
 			fr_fatal_assert_fail("CONSISTENCY CHECK FAILED %s[%u]: TMPL_TYPE_ATTR "
 					     "has non-zero bytes after the data.attribute struct in the union",
 					     file, line);
@@ -4630,8 +4719,7 @@ void tmpl_verify(char const *file, int line, tmpl_t const *vpt)
 
 	case TMPL_TYPE_LIST:
 		if ((nz = CHECK_ZEROED(vpt, attribute))) {
-			HEX_MARKER1((uint8_t const *)&vpt->data.attribute, sizeof(vpt->data.attribute),
-				    nz - (uint8_t const *)&vpt->data.attribute, "non-zero memory", "");
+			PRINT_NON_ZEROED(vpt, attribute, nz);
 			fr_fatal_assert_fail("CONSISTENCY CHECK FAILED %s[%u]: TMPL_TYPE_LIST"
 					     "has non-zero bytes after the data.attribute struct in the union",
 					     file, line);
@@ -4649,8 +4737,7 @@ void tmpl_verify(char const *file, int line, tmpl_t const *vpt)
 
 	case TMPL_TYPE_DATA:
 		if ((nz = CHECK_ZEROED(vpt, literal))) {
-			HEX_MARKER1((uint8_t const *)&vpt->data.attribute, sizeof(vpt->data.attribute),
-				    nz - (uint8_t const *)&vpt->data.attribute, "non-zero memory", "");
+			PRINT_NON_ZEROED(vpt, literal, nz);
 			fr_fatal_assert_fail("CONSISTENCY CHECK FAILED %s[%u]: TMPL_TYPE_DATA "
 					     "has non-zero bytes after the data.literal struct in the union",
 					     file, line);
@@ -4690,12 +4777,7 @@ void tmpl_verify(char const *file, int line, tmpl_t const *vpt)
 	case TMPL_TYPE_REGEX_UNCOMPILED:
 	case TMPL_TYPE_REGEX_XLAT:
 	case TMPL_TYPE_REGEX_XLAT_UNRESOLVED:
-#ifdef HAVE_REGEX
-		if (tmpl_regex(vpt) != NULL) {
-			fr_fatal_assert_fail("CONSISTENCY CHECK FAILED %s[%u]: TMPL_TYPE_REGEX_XLAT_UNRESOLVED "
-					     "preg field was not NULL", file, line);
-		}
-#else
+#ifndef HAVE_REGEX
 		fr_fatal_assert_fail("CONSISTENCY CHECK FAILED %s[%u]: TMPL_TYPE_REGEX_XLAT_UNRESOLVED - No regex support",
 				     file, line);
 #endif

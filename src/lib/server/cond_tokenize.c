@@ -93,7 +93,7 @@ ssize_t cond_print(fr_sbuff_t *out, fr_cond_t const *in)
 							   fr_table_str_by_value(fr_value_box_type_table,
 										 c->cast->type, "??"));
 			}
-			FR_SBUFF_RETURN(tmpl_print, &our_out, c->data.vpt);
+			FR_SBUFF_RETURN(tmpl_print_quoted, &our_out, c->data.vpt, TMPL_ATTR_REF_PREFIX_YES);
 			break;
 
 		case COND_TYPE_MAP:
@@ -102,7 +102,7 @@ ssize_t cond_print(fr_sbuff_t *out, fr_cond_t const *in)
 							   fr_table_str_by_value(fr_value_box_type_table,
 										 c->cast->type, "??"));
 			}
-			FR_SBUFF_RETURN(map_snprint, &our_out, c->data.map);
+			FR_SBUFF_RETURN(map_print, &our_out, c->data.map);
 			break;
 
 		case COND_TYPE_CHILD:
@@ -1134,7 +1134,7 @@ static ssize_t cond_tokenize_operand(TALLOC_CTX *ctx, tmpl_t **out,
 
 	fr_sbuff_t			our_in = FR_SBUFF_NO_ADVANCE(in);
 	fr_sbuff_marker_t		m;
-	tmpl_t			*vpt;
+	tmpl_t				*vpt;
 	fr_token_t			type;
 	fr_type_t			cast = FR_TYPE_INVALID;
 	fr_sbuff_parse_rules_t const	*p_rules;
@@ -1145,7 +1145,7 @@ static ssize_t cond_tokenize_operand(TALLOC_CTX *ctx, tmpl_t **out,
 	/*
 	 *	Parse (optional) cast
 	 */
-	slen = tmpl_cast_substr(&cast, &our_in);
+	slen = tmpl_cast_from_substr(&cast, &our_in);
 	if (slen < 0) return slen;
 
 	fr_sbuff_adv_past_whitespace(&our_in, SIZE_MAX);
@@ -1252,7 +1252,11 @@ static ssize_t cond_tokenize_operand(TALLOC_CTX *ctx, tmpl_t **out,
 		goto error;
 	}
 
-	vpt->cast = cast;
+	if (tmpl_cast_set(vpt, cast) < 0) {
+		fr_sbuff_set(&our_in, &m);	/* Reset to start of cast */
+		goto error;
+	}
+
 	*out = vpt;
 
 	fr_sbuff_marker(opd_start, in);

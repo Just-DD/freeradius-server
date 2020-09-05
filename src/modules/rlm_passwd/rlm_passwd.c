@@ -300,7 +300,7 @@ static struct mypasswd * get_pw_nam(char * name, struct hashtable* ht,
 	int h;
 	struct mypasswd * hashentry;
 
-	if (!ht || !name || *name == '\0') return NULL;
+	if (!ht || !name || (*name == '\0')) return NULL;
 	*last_found = NULL;
 	if (ht->tablesize > 0) {
 		h = hash (name, ht->tablesize);
@@ -551,7 +551,7 @@ static rlm_rcode_t CC_HINT(nonnull) mod_passwd_map(module_ctx_t const *mctx, REQ
 		/*
 		 *	Ensure we have the string form of the attribute
 		 */
-		fr_pair_value_snprint(buffer, sizeof(buffer), i, 0);
+		fr_pair_print_value_quoted(&FR_SBUFF_OUT(buffer, sizeof(buffer)), i, T_BARE_WORD);
 		pw = get_pw_nam(buffer, inst->ht, &last_found);
 		if (!pw) continue;
 

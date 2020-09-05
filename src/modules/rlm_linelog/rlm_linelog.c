@@ -576,14 +576,13 @@ build_vector:
 			switch (vp->vp_type) {
 			case FR_TYPE_OCTETS:
 			case FR_TYPE_STRING:
-				vector[i].iov_base = vp->vp_ptr;
 				vector[i].iov_len = vp->vp_length;
+				vector[i].iov_base = vp->vp_ptr;
 				break;
 
 			default:
-				p = fr_pair_value_asprint(vector, vp, '\0');
+				vector[i].iov_len = fr_value_box_aprint(vector, &p, &vp->data, NULL);
 				vector[i].iov_base = p;
-				vector[i].iov_len = talloc_array_length(p) - 1;
 				break;
 			}
 

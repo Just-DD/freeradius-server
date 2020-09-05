@@ -335,7 +335,7 @@ int		fr_pair_value_strdup_shallow(VALUE_PAIR *vp, char const *src, bool tainted)
 
 int		fr_pair_value_strtrim(VALUE_PAIR *vp);
 
-int		fr_pair_value_asprintf(VALUE_PAIR *vp, char const *fmt, ...) CC_HINT(format (printf, 2, 3));
+int		fr_pair_value_aprintf(VALUE_PAIR *vp, char const *fmt, ...) CC_HINT(format (printf, 2, 3));
 /** @} */
 
 /** @name Assign and manipulate binary-safe strings
@@ -359,7 +359,7 @@ int		fr_pair_value_bstrn_append(VALUE_PAIR *vp, char const *src, size_t len, boo
 int		fr_pair_value_bstr_append_buffer(VALUE_PAIR *vp, char const *src, bool tainted);
  /** @} */
 
- /** @name Assign and manipulate octets strings
+/** @name Assign and manipulate octets strings
  *
  * @{
  */
@@ -380,22 +380,35 @@ int		fr_pair_value_mem_append(VALUE_PAIR *vp, uint8_t *src, size_t len, bool tai
 int		fr_pair_value_mem_append_buffer(VALUE_PAIR *vp, uint8_t *src, bool tainted);
  /** @} */
 
-/* Printing functions */
-size_t   	fr_pair_value_snprint(char *out, size_t outlen, VALUE_PAIR const *vp, char quote);
-char     	*fr_pair_value_asprint(TALLOC_CTX *ctx, VALUE_PAIR const *vp, char quote);
-char const	*fr_pair_value_enum(VALUE_PAIR const *vp, char buff[static 20]);
-int		fr_pair_value_enum_box(fr_value_box_t const **out, VALUE_PAIR *vp);
+/** @name Enum functions
+ *
+ * @{
+ */
+char const		*fr_pair_value_enum(VALUE_PAIR const *vp, char buff[static 20]);
 
-size_t		fr_pair_snprint(char *out, size_t outlen, VALUE_PAIR const *vp);
-void		fr_pair_fprint(FILE *, VALUE_PAIR const *vp);
+int			fr_pair_value_enum_box(fr_value_box_t const **out, VALUE_PAIR *vp);
+/** @} */
 
-#define		fr_pair_list_log(_log, _vp) _fr_pair_list_log(_log, _vp, __FILE__, __LINE__);
-void		_fr_pair_list_log(fr_log_t const *log, VALUE_PAIR const *vp, char const *file, int line);
-char		*fr_pair_type_asprint(TALLOC_CTX *ctx, fr_type_t type);
-char		*fr_pair_asprint(TALLOC_CTX *ctx, VALUE_PAIR const *vp, char quote);
+/** @name Printing functions
+ *
+ * @{
+ */
+ssize_t   		fr_pair_print_value_quoted(fr_sbuff_t *out, VALUE_PAIR const *vp, fr_token_t quote);
 
-void		fr_pair_list_tainted(VALUE_PAIR *vp);
-VALUE_PAIR	*fr_pair_list_afrom_box(TALLOC_CTX *ctx, fr_dict_t const *dict, fr_value_box_t *box);
+static inline size_t	fr_pair_aprint_value_quoted(TALLOC_CTX *ctx, char **out, VALUE_PAIR const *vp, fr_token_t quote) SBUFF_OUT_TALLOC_FUNC_NO_LEN_DEF(fr_pair_print_value_quoted, vp, quote)
+
+ssize_t			fr_pair_print(fr_sbuff_t *out, VALUE_PAIR const *vp);
+
+static inline size_t	fr_pair_aprint(TALLOC_CTX *ctx, char **out, VALUE_PAIR const *vp) SBUFF_OUT_TALLOC_FUNC_NO_LEN_DEF(fr_pair_print, vp)
+
+void			fr_pair_fprint(FILE *, VALUE_PAIR const *vp);
+
+#define			fr_pair_list_log(_log, _vp) _fr_pair_list_log(_log, _vp, __FILE__, __LINE__);
+void			_fr_pair_list_log(fr_log_t const *log, VALUE_PAIR const *vp, char const *file, int line);
+/** @} */
+
+void			fr_pair_list_tainted(VALUE_PAIR *vp);
+VALUE_PAIR		*fr_pair_list_afrom_box(TALLOC_CTX *ctx, fr_dict_t const *dict, fr_value_box_t *box);
 
 /* Tokenization */
 typedef struct {

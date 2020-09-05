@@ -587,7 +587,7 @@ static void dhcp_packet_debug(RADIUS_PACKET *packet, bool received)
 	     vp = fr_cursor_next(&cursor)) {
 		VP_VERIFY(vp);
 
-		fr_pair_snprint(buffer, sizeof(buffer), vp);
+		fr_pair_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), vp);
 		printf("\t%s\n", buffer);
 	}
 }

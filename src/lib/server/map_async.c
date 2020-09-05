@@ -876,7 +876,7 @@ static inline void map_list_mod_debug(REQUEST *request,
 	{
 		char buffer[256];
 
-		tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map->rhs);
+		tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map->rhs, TMPL_ATTR_REF_PREFIX_YES, NULL);
 		rhs = fr_asprintf(request, "%s -> %s%pV%s", buffer, quote, vb, quote);
 	}
 		break;

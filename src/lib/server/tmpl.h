@@ -382,14 +382,21 @@ typedef struct {
  * @see vp_map_t
  */
 struct tmpl_s {
-	tmpl_type_t	type;		//!< What type of value tmpl refers to.
+	tmpl_type_t	_CONST type;		//!< What type of value tmpl refers to.
 
 	char const	* _CONST name;		//!< Raw string used to create the template.
+						///< this string will have any escape sequences left intact.
 	size_t		_CONST len;		//!< Length of the raw string used to create the template.
 	fr_token_t	_CONST quote;		//!< What type of quoting was around the raw string.
 
 	union {
+		char *unescaped;		//!< Unescaped form of the name, used for TMPL_TYPE_UNRESOLVED
+						///< and TMPL_TYPE_REGEX_UNCOMPILED.
+
 		_CONST struct {
+			bool			ref_prefix;	//!< true if the reference was prefixed
+								///< with a '&'.
+
 			fr_dlist_head_t		rr;	//!< Request to search or insert in.
 
 			pair_list_t		list;	//!< List to search or insert in.
@@ -405,20 +412,20 @@ struct tmpl_s {
 		 */
 		fr_value_box_t	literal;			 //!< Value data.
 
-		struct {
+		_CONST struct {
 			xlat_exp_t		*ex;	 	//!< pre-parsed xlat_exp_t
 			xlat_flags_t		flags;		//!< Flags controlling evaluation
 								///< and expansion.
 		} xlat;
 #ifdef HAVE_REGEX
-		struct {
-			regex_t			*preg;		//!< pre-parsed regex_t
-			fr_regex_flags_t	regex_flags;	//!< Flags for regular expressions.
-		};
+		_CONST struct {
+			regex_t			*ex;		//!< pre-parsed regex_t
+			fr_regex_flags_t	flags;		//!< Flags for regular expressions.
+		} reg;
 #endif
 	} data;
 
-	fr_type_t	cast;
+	fr_type_t	_CONST cast;
 	tmpl_rules_t	_CONST rules;
 };
 
@@ -522,17 +529,18 @@ static inline pair_list_t tmpl_list(tmpl_t const *vpt)
  *
  * @{
  */
-#define tmpl_xlat(_tmpl)		(_tmpl)->data.xlat.ex
-#define tmpl_xlat_flags(_tmpl)		(&(_tmpl)->data.xlat.flags)
+#define tmpl_xlat(_tmpl)			(_tmpl)->data.xlat.ex
+#define tmpl_xlat_flags(_tmpl)			(&(_tmpl)->data.xlat.flags)
 /** @} */
 
 /** @name Field accessors for #TMPL_TYPE_DATA
  *
  * @{
  */
-#define tmpl_value(_tmpl)		(&(_tmpl)->data.literal)
-#define tmpl_value_length(_tmpl)	(_tmpl)->data.literal.datum.length
-#define tmpl_value_type(_tmpl)		(_tmpl)->data.literal.type
+#define tmpl_value(_tmpl)			(&(_tmpl)->data.literal)
+#define tmpl_value_length(_tmpl)		(_tmpl)->data.literal.datum.length
+#define tmpl_value_type(_tmpl)			(_tmpl)->data.literal.type
+#define tmpl_value_enumv(_tmpl)			(_tmpl)->data.literal.enumv
 
 /*
  *	Temporary macros to track where we do assignments
@@ -546,8 +554,8 @@ static inline pair_list_t tmpl_list(tmpl_t const *vpt)
  * @{
  */
 #ifdef HAVE_REGEX
-#  define tmpl_regex(_tmpl)		(_tmpl)->data.preg	//!< #TMPL_TYPE_REGEX only.
-#  define tmpl_regex_flags(_tmpl)	(&(_tmpl)->data.regex_flags)
+#  define tmpl_regex(_tmpl)			(_tmpl)->data.reg.ex		//!< #TMPL_TYPE_REGEX only.
+#  define tmpl_regex_flags(_tmpl)		(&(_tmpl)->data.reg.flags)
 #endif
 /** @} */
 
@@ -771,7 +779,9 @@ ssize_t			tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 					  fr_sbuff_parse_rules_t const *p_rules,
 					  tmpl_rules_t const *ar_rules);
 
-ssize_t			tmpl_cast_substr(fr_type_t *out, fr_sbuff_t *in);	/* Parses cast string */
+ssize_t			tmpl_cast_from_substr(fr_type_t *vpt, fr_sbuff_t *in);	/* Parses cast string */
+
+int			tmpl_cast_set(tmpl_t *vpt, fr_type_t type);		/* Sets cast type */
 
 #ifdef HAVE_REGEX
 ssize_t			tmpl_regex_flags_substr(tmpl_t *vpt, fr_sbuff_t *in,
@@ -790,9 +800,9 @@ void			tmpl_unresolve(tmpl_t *vpt) CC_HINT(nonnull);
 
 int			tmpl_attr_to_xlat(TALLOC_CTX *ctx, tmpl_t **vpt_p);
 
-int			tmpl_attr_abstract_to_concrete(tmpl_t *vpt, fr_type_t type);
-
 void			tmpl_attr_to_raw(tmpl_t *vpt);
+
+int			tmpl_attr_abstract_to_concrete(tmpl_t *vpt, fr_type_t type);
 
 int			tmpl_attr_unknown_add(tmpl_t *vpt);
 
@@ -807,9 +817,12 @@ ssize_t			tmpl_regex_compile(tmpl_t *vpt, bool subcaptures, bool runtime);
 /** @name Print the contents of a #tmpl_t
  * @{
  */
-ssize_t			tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt);
+ssize_t			tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_prefix_t ar_prefix);
 
-ssize_t			tmpl_print(fr_sbuff_t *out, tmpl_t const *vpt);
+ssize_t			tmpl_print(fr_sbuff_t *out, tmpl_t const *vpt,
+				   tmpl_attr_ref_prefix_t ar_prefix, fr_sbuff_escape_rules_t const *e_rules);
+
+ssize_t			tmpl_print_quoted(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_prefix_t ar_prefix);
 /** @} */
 
 ssize_t			_tmpl_to_type(void *out,

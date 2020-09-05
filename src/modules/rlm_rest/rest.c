@@ -366,6 +366,7 @@ static size_t rest_encode_post(void *out, size_t size, size_t nmemb, void *userd
 	char			*escaped;	/* Pointer to current URL escaped data */
 
 	size_t			len = 0;
+	ssize_t			slen;
 	size_t			freespace = (size * nmemb) - 1;
 
 	/* Allow manual chunking */
@@ -434,14 +435,14 @@ static size_t rest_encode_post(void *out, size_t size, size_t nmemb, void *userd
 		/*
 		 *  Write out single attribute string.
 		 */
-		len = fr_pair_value_snprint(p, freespace, vp, 0);
-		if (is_truncated(len, freespace)) goto no_space;
+		slen = fr_pair_print_value_quoted(&FR_SBUFF_OUT(p, freespace), vp, T_BARE_WORD);
+		if (slen < 0) return 0;
 
 		RINDENT();
-		RDEBUG3("Length : %zd", len);
+		RDEBUG3("Length : %zd", (size_t)slen);
 		REXDENT();
-		if (len > 0) {
-			escaped = curl_escape(p, len);
+		if (slen > 0) {
+			escaped = curl_escape(p, (size_t)slen);
 			if (!escaped) {
 				REDEBUG("Failed escaping string \"%s\"", vp->da->name);
 				return 0;

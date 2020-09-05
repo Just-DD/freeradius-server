@@ -94,9 +94,8 @@ ssize_t trigger_xlat(UNUSED TALLOC_CTX *ctx, char **out, UNUSED size_t outlen,
 		ERROR("Attribute \"%s\" is not valid for this trigger", fmt);
 		return -1;
 	}
-	*out = fr_pair_value_asprint(request, vp, '\0');
 
-	return talloc_array_length(*out) - 1;
+	return fr_value_box_aprint(request, out, &vp->data, NULL);
 }
 
 static int _mutex_free(pthread_mutex_t *mutex)

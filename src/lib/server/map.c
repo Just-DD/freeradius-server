@@ -695,6 +695,9 @@ int map_afrom_vp(TALLOC_CTX *ctx, vp_map_t **out, VALUE_PAIR *vp, tmpl_rules_t c
 		return -1;
 	}
 
+	/*
+	 *	Allocate the LHS
+	 */
 	map->lhs = tmpl_alloc(map, TMPL_TYPE_ATTR, T_BARE_WORD, NULL, 0);
 	if (!map->lhs) goto oom;
 
@@ -704,9 +707,12 @@ int map_afrom_vp(TALLOC_CTX *ctx, vp_map_t **out, VALUE_PAIR *vp, tmpl_rules_t c
 	tmpl_attr_set_request(map->lhs, rules->request_def);
 	tmpl_attr_set_list(map->lhs, rules->list_def);
 
-	tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map->lhs);
+	tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map->lhs, TMPL_ATTR_REF_PREFIX_YES, NULL);
 	tmpl_set_name(map->lhs, T_BARE_WORD, buffer, -1);
 
+	/*
+	 *	Allocate the RHS
+	 */
 	map->rhs = tmpl_alloc(map, TMPL_TYPE_DATA, T_BARE_WORD, NULL, -1);
 	if (!map->lhs) goto oom;
 
@@ -1120,14 +1126,16 @@ int map_to_vp(TALLOC_CTX *ctx, VALUE_PAIR **out, REQUEST *request, vp_map_t cons
 #define DEBUG_OVERWRITE(_old, _new) \
 do {\
 	if (RDEBUG_ENABLED3) {\
-		char *old = fr_pair_value_asprint(request, _old, '"');\
-		char *n = fr_pair_value_asprint(request, _new, '"');\
-		RINDENT();\
-		RDEBUG3("--> overwriting '%s' with '%s'", old, n);\
-		REXDENT();\
-		talloc_free(old);\
-		talloc_free(n);\
-	}\
+		char *our_old; \
+		char *our_new; \
+		fr_pair_aprint_value_quoted(request, &our_old, _old, T_DOUBLE_QUOTED_STRING); \
+		fr_pair_aprint_value_quoted(request, &our_new, _new, T_DOUBLE_QUOTED_STRING); \
+		RINDENT(); \
+		RDEBUG3("--> overwriting '%s' with '%s'", our_old, our_new); \
+		REXDENT(); \
+		talloc_free(our_old); \
+		talloc_free(our_new); \
+	} \
 } while (0)
 
 /** Convert #vp_map_t to #VALUE_PAIR (s) and add them to a #REQUEST.
@@ -1541,7 +1549,7 @@ finish:
 	return rcode;
 }
 
-/**  Print a map to a string
+/** Print a map to a string
  *
  * @param[out] out	Buffer to write string to.
  * @param[in] map	to print.
@@ -1549,7 +1557,7 @@ finish:
  *	- The number of bytes written to the out buffer.
  *	- A number >= outlen if truncation has occurred.
  */
-ssize_t map_snprint(fr_sbuff_t *out, vp_map_t const *map)
+ssize_t map_print(fr_sbuff_t *out, vp_map_t const *map)
 {
 	fr_sbuff_t	our_out = FR_SBUFF_NO_ADVANCE(out);
 
@@ -1558,7 +1566,7 @@ ssize_t map_snprint(fr_sbuff_t *out, vp_map_t const *map)
 	/*
 	 *	Print the lhs
 	 */
-	FR_SBUFF_RETURN(tmpl_print, &our_out, map->lhs);
+	FR_SBUFF_RETURN(tmpl_print_quoted, &our_out, map->lhs, TMPL_ATTR_REF_PREFIX_YES);
 
 	/*
 	 *	Print separators and operator
@@ -1587,7 +1595,7 @@ ssize_t map_snprint(fr_sbuff_t *out, vp_map_t const *map)
 	/*
 	 *	Print the RHS.
 	 */
-	FR_SBUFF_RETURN(tmpl_print, &our_out, map->rhs);
+	FR_SBUFF_RETURN(tmpl_print_quoted, &our_out, map->rhs, TMPL_ATTR_REF_PREFIX_YES);
 
 	return fr_sbuff_set(out, &our_out);
 }
@@ -1612,15 +1620,15 @@ void map_debug_log(REQUEST *request, vp_map_t const *map, VALUE_PAIR const *vp)
 	 */
 	default:
 	case TMPL_TYPE_UNRESOLVED:
-		rhs = fr_pair_value_asprint(request, vp, fr_token_quote[map->rhs->quote]);
+		fr_pair_aprint_value_quoted(request, &rhs, vp, map->rhs->quote);
 		break;
 
 	case TMPL_TYPE_XLAT:
-		rhs = fr_pair_value_asprint(request, vp, fr_token_quote[map->rhs->quote]);
+		fr_pair_aprint_value_quoted(request, &rhs, vp, map->rhs->quote);
 		break;
 
 	case TMPL_TYPE_DATA:
-		rhs = fr_pair_value_asprint(request, vp, fr_token_quote[map->rhs->quote]);
+		fr_pair_aprint_value_quoted(request, &rhs, vp, map->rhs->quote);
 		break;
 
 	/*
@@ -1630,10 +1638,19 @@ void map_debug_log(REQUEST *request, vp_map_t const *map, VALUE_PAIR const *vp)
 	 */
 	case TMPL_TYPE_LIST:
 	{
-		tmpl_t	*vpt;
-		char const	*quote = (vp->vp_type == FR_TYPE_STRING) ? "\"" : "";
+		tmpl_t		*vpt;
+		fr_token_t	quote;
 
-		vpt = tmpl_alloc(request, TMPL_TYPE_ATTR, *quote, map->rhs->name, strlen(map->rhs->name));
+		switch (vp->vp_type) {
+		case FR_TYPE_QUOTED:
+			quote = T_DOUBLE_QUOTED_STRING;
+			break;
+		default:
+			quote = T_BARE_WORD;
+			break;
+		}
+
+		vpt = tmpl_alloc(request, TMPL_TYPE_ATTR, quote, map->rhs->name, strlen(map->rhs->name));
 
 		/*
 		 *	Fudge a temporary tmpl that describes the attribute we're copying
@@ -1649,9 +1666,9 @@ void map_debug_log(REQUEST *request, vp_map_t const *map, VALUE_PAIR const *vp)
 		 *	around the list ref. The attribute value has no quoting, so we choose
 		 *	the quoting based on the data type.
 		 */
-		value = fr_pair_value_asprint(request, vp, quote[0]);
-		tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), vpt);
-		rhs = talloc_typed_asprintf(request, "%s -> %s%s%s", buffer, quote, value, quote);
+		fr_pair_aprint_value_quoted(request, &value, vp, quote);
+		tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), vpt, TMPL_ATTR_REF_PREFIX_YES, NULL);
+		rhs = talloc_typed_asprintf(request, "%s -> %s", buffer, value);
 
 		talloc_free(vpt);
 	}
@@ -1659,18 +1676,25 @@ void map_debug_log(REQUEST *request, vp_map_t const *map, VALUE_PAIR const *vp)
 
 	case TMPL_TYPE_ATTR:
 	{
-		char const *quote;
+		fr_token_t	quote;
 
-		quote = (vp->vp_type == FR_TYPE_STRING) ? "\"" : "";
+		switch (vp->vp_type) {
+		case FR_TYPE_QUOTED:
+			quote = T_DOUBLE_QUOTED_STRING;
+			break;
+		default:
+			quote = T_BARE_WORD;
+			break;
+		}
 
 		/*
 		 *	Not appropriate to use map->rhs->quote here, as that's the quoting
 		 *	around the attr ref. The attribute value has no quoting, so we choose
 		 *	the quoting based on the data type.
 		 */
-		value = fr_pair_value_asprint(request, vp, quote[0]);
-		tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map->rhs);
-		rhs = talloc_typed_asprintf(request, "%s -> %s%s%s", buffer, quote, value, quote);
+		fr_pair_aprint_value_quoted(request, &value, vp, quote);
+		tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map->rhs, TMPL_ATTR_REF_PREFIX_YES, NULL);
+		rhs = talloc_typed_asprintf(request, "%s -> %s", buffer, value);
 	}
 		break;
 
@@ -1687,14 +1711,14 @@ void map_debug_log(REQUEST *request, vp_map_t const *map, VALUE_PAIR const *vp)
 		 *	map name.
 		 */
 		if (vp) {
-			tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map->lhs);
+			tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map->lhs, TMPL_ATTR_REF_PREFIX_YES, NULL);	/* Fixme - bad escaping */
 			RDEBUG2("%s%s %s %s", buffer, vp->da->name, fr_table_str_by_value(fr_tokens_table, vp->op, "<INVALID>"), rhs);
 			break;
 		}
 		FALL_THROUGH;
 
 	case TMPL_TYPE_ATTR:
-		tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map->lhs);
+		tmpl_print(&FR_SBUFF_OUT(buffer, sizeof(buffer)), map->lhs, TMPL_ATTR_REF_PREFIX_YES, NULL);
 		RDEBUG2("%s %s %s", buffer, fr_table_str_by_value(fr_tokens_table, vp ? vp->op : map->op, "<INVALID>"), rhs);
 		break;
 
