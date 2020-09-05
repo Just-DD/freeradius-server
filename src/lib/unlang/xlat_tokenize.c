@@ -403,7 +403,7 @@ static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, fr
 		memset(&our_ar_rules, 0, sizeof(our_ar_rules));
 	}
 
-	our_ar_rules.allow_unparsed = true;		/* So we can check for virtual attributes later */
+	our_ar_rules.allow_unresolved = true;		/* So we can check for virtual attributes later */
   	our_ar_rules.prefix = TMPL_ATTR_REF_PREFIX_NO;	/* Must be NO to stop %{&User-Name} */
 
 	fr_sbuff_marker(&m_s, in);
@@ -436,12 +436,12 @@ static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, fr
 	 *	list.
 	 */
 	switch (vpt->type) {
-	case TMPL_TYPE_ATTR_UNPARSED:
-		func = xlat_func_find(tmpl_attr_unparsed(vpt), -1);
+	case TMPL_TYPE_ATTR_UNRESOLVED:
+		func = xlat_func_find(tmpl_attr_unresolved(vpt), -1);
 
 		if (func && (func->type == XLAT_FUNC_LEGACY)) {
 			xlat_exp_set_type(node, XLAT_VIRTUAL);
-			xlat_exp_set_name_buffer(node, tmpl_attr_unparsed(vpt));
+			xlat_exp_set_name_buffer(node, tmpl_attr_unresolved(vpt));
 			talloc_free(vpt);	/* Free the tmpl, we don't need it */
 
 			XLAT_DEBUG("VIRTUAL <-- %pV", fr_box_strvalue_len(fr_sbuff_current(in), fr_sbuff_remaining(in)));
@@ -456,7 +456,7 @@ static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, fr
 			goto done;
 		}
 
-		if (!ar_rules || !ar_rules->allow_unparsed) {
+		if (!ar_rules || !ar_rules->allow_unresolved) {
 			talloc_free(vpt);
 
 			fr_strerror_printf("Unknown attribute");
@@ -531,11 +531,7 @@ static int xlat_tokenize_expansion(TALLOC_CTX *ctx, xlat_exp_t **head, fr_sbuff_
 	/*
 	 *	%{Attr-Name}
 	 *	%{Attr-Name[#]}
-	 *	%{Tunnel-Password:1}
-	 *	%{Tunnel-Password:1[#]}
 	 *	%{request:Attr-Name}
-	 *	%{request:Tunnel-Password:1}
-	 *	%{request:Tunnel-Password:1[#]}
 	 *	%{mod:foo}
 	 */
 
@@ -996,16 +992,12 @@ static void xlat_tokenize_debug(REQUEST *request, xlat_exp_t const *node)
 			fr_assert(tmpl_da(node->attr) != NULL);
 			RDEBUG3("attribute --> %s", tmpl_da(node->attr)->name);
 			fr_assert(node->child == NULL);
-			if ((tmpl_tag(node->attr) != TAG_ANY) || (tmpl_num(node->attr) != NUM_ANY)) {
+			if (tmpl_num(node->attr) != NUM_ANY) {
 				RDEBUG3("{");
 
 				RINDENT();
 				RDEBUG3("ref  %d", tmpl_request(node->attr));
 				RDEBUG3("list %d", tmpl_list(node->attr));
-
-				if (tmpl_tag(node->attr) != TAG_ANY) {
-					RDEBUG3("tag %d", tmpl_tag(node->attr));
-				}
 				if (tmpl_num(node->attr) != NUM_ANY) {
 					if (tmpl_num(node->attr) == NUM_COUNT) {
 						RDEBUG3("[#]");

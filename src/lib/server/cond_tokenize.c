@@ -257,7 +257,7 @@ static ssize_t cond_check_cast(fr_cond_t *c, char const *start,
 	}
 
 #ifdef HAVE_REGEX
-	if (tmpl_is_regex_unparsed(c->data.map->rhs)) {
+	if (tmpl_is_regex_unresolved(c->data.map->rhs)) {
 		fr_strerror_printf("Cannot use cast with regex comparison");
 		return -(rhs - start);
 	}
@@ -267,7 +267,7 @@ static ssize_t cond_check_cast(fr_cond_t *c, char const *start,
 	 *	The LHS is a literal which has been cast to a data type.
 	 *	Cast it to the appropriate data type.
 	 */
-	if (tmpl_is_unparsed(c->data.map->lhs) &&
+	if (tmpl_is_unresolved(c->data.map->lhs) &&
 	    (tmpl_cast_in_place(c->data.map->lhs, c->cast->type, c->cast) < 0)) {
 		fr_strerror_printf("Failed to parse field");
 		return -(lhs - start);
@@ -278,7 +278,7 @@ static ssize_t cond_check_cast(fr_cond_t *c, char const *start,
 	 *	type.
 	 */
 	if ((tmpl_is_data(c->data.map->lhs)) &&
-	    (tmpl_is_unparsed(c->data.map->rhs)) &&
+	    (tmpl_is_unresolved(c->data.map->rhs)) &&
 	    (tmpl_cast_in_place(c->data.map->rhs, c->cast->type, c->cast) < 0)) {
 		fr_strerror_printf("Failed to parse field");
 		return -(rhs - start);
@@ -371,7 +371,7 @@ cast_ok:
  */
 static ssize_t cond_check_attrs(fr_cond_t *c, fr_sbuff_marker_t *m_lhs, fr_sbuff_marker_t *m_rhs)
 {
-	tmpl_t	*attr, *data, *xlat, *unparsed, *xlat_unparsed, *exec, *vpt;
+	tmpl_t	*attr, *data, *xlat, *unresolved, *xlat_unresolved, *exec, *vpt;
 	tmpl_t	*lhs = c->data.map->lhs, *rhs = c->data.map->rhs;
 	fr_token_t	op = c->data.map->op;
 
@@ -441,7 +441,7 @@ static ssize_t cond_check_attrs(fr_cond_t *c, fr_sbuff_marker_t *m_lhs, fr_sbuff
 	 *
 	 *	FIXME - We should revisit this when RHS casting is supported.
 	 */
-	if (c->cast && tmpl_is_unparsed(rhs) &&
+	if (c->cast && tmpl_is_unresolved(rhs) &&
 	    (tmpl_cast_in_place(rhs, c->cast->type, c->cast) < 0)) {
 	    	fr_strerror_printf("Failed to parse field");
 		return -fr_sbuff_used(m_rhs);
@@ -456,11 +456,11 @@ static ssize_t cond_check_attrs(fr_cond_t *c, fr_sbuff_marker_t *m_lhs, fr_sbuff
 	 *
 	 *	This allows Framed-IP-Address < 192.168.0.0./24
 	 */
-	unparsed = NULL;
-	if (TMPL_OF_TYPE_A_B(attr, unparsed) || TMPL_OF_TYPE_A_B(attr, data)) {
+	unresolved = NULL;
+	if (TMPL_OF_TYPE_A_B(attr, unresolved) || TMPL_OF_TYPE_A_B(attr, data)) {
 		fr_type_t type = tmpl_da(attr)->type;
 
-		vpt = unparsed ? unparsed : data;
+		vpt = unresolved ? unresolved : data;
 
 		switch (tmpl_da(attr)->type) {
 		case FR_TYPE_IPV4_ADDR:
@@ -533,18 +533,18 @@ static ssize_t cond_check_attrs(fr_cond_t *c, fr_sbuff_marker_t *m_lhs, fr_sbuff
 	} /* attr to literal comparison */
 
 	/*
-	 *	If one side is unparsed, and the other is data,
+	 *	If one side is unresolved, and the other is data,
 	 *	we can use the data type to attempt a cast on the
-	 *	unparsed side.
+	 *	unresolved side.
 	 */
-	if (TMPL_OF_TYPE_A_B(data, unparsed) &&
-	    (tmpl_cast_in_place(unparsed, tmpl_value_type(data), NULL) < 0)) TMPL_RETURN(unparsed);
+	if (TMPL_OF_TYPE_A_B(data, unresolved) &&
+	    (tmpl_cast_in_place(unresolved, tmpl_value_type(data), NULL) < 0)) TMPL_RETURN(unresolved);
 
 	/*
 	 *	The RHS will turn into... something.  Allow for prefixes
 	 *	there, too.
 	 */
-	if (TMPL_OF_TYPE_A_B(attr, xlat_unparsed) || TMPL_OF_TYPE_A_B(attr, xlat) || TMPL_OF_TYPE_A_B(attr, exec)) {
+	if (TMPL_OF_TYPE_A_B(attr, xlat_unresolved) || TMPL_OF_TYPE_A_B(attr, xlat) || TMPL_OF_TYPE_A_B(attr, exec)) {
 		if (tmpl_da(attr)->type == FR_TYPE_IPV4_ADDR) {
 			c->cast = fr_dict_attr_child_by_num(fr_dict_root(fr_dict_internal()),
 							    FR_CAST_BASE + FR_TYPE_IPV4_PREFIX);
@@ -566,7 +566,7 @@ static ssize_t cond_check_attrs(fr_cond_t *c, fr_sbuff_marker_t *m_lhs, fr_sbuff
 	 *	and do no parsing until after all of the modules
 	 *	are loaded.  But that has issues, too.
 	 */
-	if (tmpl_is_unparsed(lhs) && (lhs->quote == T_BARE_WORD)) {
+	if (tmpl_is_unresolved(lhs) && (lhs->quote == T_BARE_WORD)) {
 		int hyphens = 0;
 		bool may_be_attr = true;
 		size_t i;
@@ -593,7 +593,7 @@ static ssize_t cond_check_attrs(fr_cond_t *c, fr_sbuff_marker_t *m_lhs, fr_sbuff
 			attr_slen = tmpl_afrom_attr_str(c->data.map, NULL, &vpt, fr_sbuff_current(m_lhs),
 							&(tmpl_rules_t){
 								.allow_unknown = true,
-								.allow_unparsed = true
+								.allow_unresolved = true
 							});
 			if ((attr_slen > 0) && (vpt->len == lhs->len)) {
 				talloc_free(lhs);
@@ -840,8 +840,8 @@ static int cond_normalise(TALLOC_CTX *ctx, fr_token_t lhs_type, fr_cond_t **c_ou
 		 *	We can do the evaluation here, so that it
 		 *	doesn't need to be done at run time
 		 */
-		if (tmpl_is_unparsed(c->data.map->rhs) &&
-		    tmpl_is_unparsed(c->data.map->lhs) &&
+		if (tmpl_is_unresolved(c->data.map->rhs) &&
+		    tmpl_is_unresolved(c->data.map->lhs) &&
 		    !c->pass2_fixup) {
 			int rcode;
 
@@ -911,7 +911,7 @@ static int cond_normalise(TALLOC_CTX *ctx, fr_token_t lhs_type, fr_cond_t **c_ou
 			/*
 			 *	This must have been parsed into TMPL_TYPE_DATA.
 			 */
-			fr_assert(!tmpl_is_unparsed(c->data.map->rhs));
+			fr_assert(!tmpl_is_unresolved(c->data.map->rhs));
 		}
 
 	} while (0);
@@ -927,9 +927,9 @@ static int cond_normalise(TALLOC_CTX *ctx, fr_token_t lhs_type, fr_cond_t **c_ou
 	 */
 	if (c->type == COND_TYPE_EXISTS) {
 		switch (c->data.vpt->type) {
-		case TMPL_TYPE_XLAT_UNPARSED:
+		case TMPL_TYPE_XLAT_UNRESOLVED:
 		case TMPL_TYPE_ATTR:
-		case TMPL_TYPE_ATTR_UNPARSED:
+		case TMPL_TYPE_ATTR_UNRESOLVED:
 		case TMPL_TYPE_LIST:
 		case TMPL_TYPE_EXEC:
 			break;
@@ -945,7 +945,7 @@ static int cond_normalise(TALLOC_CTX *ctx, fr_token_t lhs_type, fr_cond_t **c_ou
 			 *	'foo' and "foo" are true.
 			 *
 			 *	The str2tmpl function takes care of
-			 *	marking "%{foo}" as TMPL_TYPE_XLAT_UNPARSED, so
+			 *	marking "%{foo}" as TMPL_TYPE_XLAT_UNRESOLVED, so
 			 *	the strings here are fixed at compile
 			 *	time.
 			 *
@@ -954,7 +954,7 @@ static int cond_normalise(TALLOC_CTX *ctx, fr_token_t lhs_type, fr_cond_t **c_ou
 			 *	Bare words must be module return
 			 *	codes.
 			 */
-		case TMPL_TYPE_UNPARSED:
+		case TMPL_TYPE_UNRESOLVED:
 			if (!*c->data.vpt->name) {
 				c->type = COND_TYPE_FALSE;
 				TALLOC_FREE(c->data.vpt);
@@ -1209,7 +1209,7 @@ static ssize_t cond_tokenize_operand(TALLOC_CTX *ctx, tmpl_t **out,
 		int			err;
 		fr_regex_flags_t	regex_flags = { };
 
-		if (!tmpl_is_regex_unparsed(vpt) && !tmpl_is_regex_xlat(vpt)) {
+		if (!tmpl_is_regex_unresolved(vpt) && !tmpl_is_regex_xlat(vpt)) {
 			fr_strerror_printf("Expected regex");
 			fr_sbuff_set(&our_in, &m);
 			goto error;
@@ -1291,7 +1291,7 @@ static ssize_t cond_tokenize(TALLOC_CTX *ctx, fr_cond_t **out,
 	 */
 	parse_rules = *rules;
 	parse_rules.allow_unknown = true;
-	parse_rules.allow_unparsed = true;
+	parse_rules.allow_unresolved = true;
 
 	MEM(c = talloc_zero(ctx, fr_cond_t));
 
@@ -1362,7 +1362,7 @@ static ssize_t cond_tokenize(TALLOC_CTX *ctx, fr_cond_t **out,
 		fr_sbuff_advance(&our_in, slen * -1);
 		goto error;
 	}
-	if (tmpl_is_attr_unparsed(lhs)) c->pass2_fixup = PASS2_FIXUP_ATTR;
+	if (tmpl_is_attr_unresolved(lhs)) c->pass2_fixup = PASS2_FIXUP_ATTR;
 
 	/*
 	 *	Hack...
@@ -1419,7 +1419,7 @@ static ssize_t cond_tokenize(TALLOC_CTX *ctx, fr_cond_t **out,
 			goto error;
 		}
 
-		if (tmpl_is_regex_unparsed(lhs)) {
+		if (tmpl_is_regex_unresolved(lhs)) {
 			fr_strerror_printf("Unexpected regular expression");
 			fr_sbuff_set(&our_in, &m_lhs);
 			goto error;
@@ -1489,7 +1489,7 @@ static ssize_t cond_tokenize(TALLOC_CTX *ctx, fr_cond_t **out,
 			fr_sbuff_advance(&our_in, slen * -1);
 			goto error;
 		}
-		if (tmpl_is_attr_unparsed(rhs)) c->pass2_fixup = PASS2_FIXUP_ATTR;
+		if (tmpl_is_attr_unresolved(rhs)) c->pass2_fixup = PASS2_FIXUP_ATTR;
 
 		*map = (vp_map_t) {
 			.ci = cf_section_to_item(cs),
@@ -1520,16 +1520,16 @@ static ssize_t cond_tokenize(TALLOC_CTX *ctx, fr_cond_t **out,
 		}
 
 		if (((op == T_OP_REG_EQ) || (op == T_OP_REG_NE)) &&
-		    !tmpl_is_regex_unparsed(lhs) && !tmpl_is_regex_xlat(lhs) &&
-		    !tmpl_is_regex_unparsed(rhs) && !tmpl_is_regex_xlat(rhs)) {
+		    !tmpl_is_regex_unresolved(lhs) && !tmpl_is_regex_xlat(lhs) &&
+		    !tmpl_is_regex_unresolved(rhs) && !tmpl_is_regex_xlat(rhs)) {
 			fr_strerror_printf("Expected regular expression");
 			fr_sbuff_set(&our_in, &m_rhs);
 			goto error;
 		}
 
 		if (((op != T_OP_REG_EQ) && (op != T_OP_REG_NE)) &&
-		    (tmpl_is_regex_unparsed(lhs) || tmpl_is_regex_xlat(lhs) ||
-		     tmpl_is_regex_unparsed(rhs) || tmpl_is_regex_xlat(rhs))) {
+		    (tmpl_is_regex_unresolved(lhs) || tmpl_is_regex_xlat(lhs) ||
+		     tmpl_is_regex_unresolved(rhs) || tmpl_is_regex_xlat(rhs))) {
 		     	fr_strerror_printf("Unexpected regular expression");	/* Fixme should point to correct operand */
 			fr_sbuff_set(&our_in, &m_rhs);
 			goto error;
@@ -1657,7 +1657,7 @@ ssize_t fr_cond_tokenize(CONF_SECTION *cs, fr_cond_t **head, fr_dict_t const *di
 	slen = cond_tokenize(cs, head, cs, &FR_SBUFF_IN(buffer, strlen(buffer)), 0,
 			     &(tmpl_rules_t){
 			     		.dict_def = dict,
-			     		.allow_unparsed = true,
+			     		.allow_unresolved = true,
 			     		.allow_unknown = true,
 			     		.allow_foreign = (dict == NULL)	/* Allow foreign attributes if we have no dict */
 			     });
