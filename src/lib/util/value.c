@@ -4974,16 +4974,12 @@ ssize_t fr_value_box_print(fr_sbuff_t *out, fr_value_box_t const *data, fr_sbuff
 
 	if (!fr_cond_assert(data->type != FR_TYPE_INVALID)) return 0;
 
-	/*
-	 *	_fr_box_with_da() uses in-line enumv's, and we don't
-	 *	want to do dictionary lookups based on that.
-	 */
 	if (data->enumv && data->enumv->name) {
-		fr_dict_enum_t const	*dv;
+		char const *name;
 
-		dv = fr_dict_enum_by_value(data->enumv, data);
-		if (dv) {
-			FR_SBUFF_IN_ESCAPE_BUFFER_RETURN(&our_out, dv->name, NULL);
+		name = fr_dict_enum_name_by_value(data->enumv, data);
+		if (name) {
+			FR_SBUFF_IN_ESCAPE_BUFFER_RETURN(&our_out, name, NULL);
 			goto done;
 		}
 	}
