@@ -399,6 +399,8 @@ struct tmpl_s {
 
 			fr_dlist_head_t		rr;	//!< Request to search or insert in.
 
+			bool			old_list_sep;	//!< Print ':'
+
 			pair_list_t		list;	//!< List to search or insert in.
 							///< deprecated.
 

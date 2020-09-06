@@ -1573,7 +1573,7 @@ static inline int tmpl_attr_ref_afrom_attr_substr(TALLOC_CTX *ctx, attr_ref_erro
 		}
 
 		if (!rules->allow_unknown) {
-			fr_strerror_printf("Unknown attribute");
+			fr_strerror_printf("Unknown attributes not allowed here");
 			if (err) *err = ATTR_REF_ERROR_UNKNOWN_ATTRIBUTE_NOT_ALLOWED;
 			fr_sbuff_set(name, &m_s);
 			goto error;
@@ -1964,10 +1964,11 @@ ssize_t tmpl_afrom_attr_substr(TALLOC_CTX *ctx, attr_ref_error_t *err,
 	 *
 	 *      This will either be after:
 	 *	- A zero length list, i.e. just after the prefix '&', in which case we require an attribue
-	 *	- A ':' and then an allowed char, so we're sure it's not just a bare list ref.
+	 *	- A ':' or '.' and then an allowed char, so we're sure it's not just a bare list ref.
 	 */
 	if ((list_len == 0) ||
-	    (fr_sbuff_next_if_char(&our_name, ':') && fr_sbuff_is_in_charset(&our_name, fr_dict_attr_allowed_chars))) {
+	    (((fr_sbuff_next_if_char(&our_name, ':') && (vpt->data.attribute.old_list_sep = true)) ||
+	     fr_sbuff_next_if_char(&our_name, '.')) && fr_sbuff_is_in_charset(&our_name, fr_dict_attr_allowed_chars))) {
 		ret = tmpl_attr_ref_afrom_attr_substr(vpt, err,
 						       vpt, NULL, &our_name, ar_rules, 0);
 		if (ret < 0) goto error;
@@ -3352,9 +3353,9 @@ ssize_t tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_pr
 		if (printed_rr) FR_SBUFF_IN_CHAR_RETURN(&our_out, '.');
 
 		FR_SBUFF_IN_TABLE_STR_RETURN(&our_out, pair_list_table, tmpl_list(vpt), "<INVALID>");
-		FR_SBUFF_IN_CHAR_RETURN(&our_out, ':');
+		FR_SBUFF_IN_CHAR_RETURN(&our_out, vpt->data.attribute.old_list_sep ? ':' : '.');
 	} else if (printed_rr) {			/* Request qualifier with no list qualifier */
-		FR_SBUFF_IN_CHAR_RETURN(&our_out, ':');
+		FR_SBUFF_IN_CHAR_RETURN(&our_out, vpt->data.attribute.old_list_sep ? ':' : '.');
 	}
 
 	/*
