@@ -195,7 +195,7 @@ int map_afrom_cp(TALLOC_CTX *ctx, vp_map_t **out, CONF_PAIR *cp,
 		 tmpl_rules_t const *lhs_rules, tmpl_rules_t const *rhs_rules)
 {
 	vp_map_t	*map;
-	char const	*attr, *value;
+	char const	*attr, *value, *marker_subject;
 	ssize_t		slen;
 	fr_token_t	type;
 
@@ -230,8 +230,9 @@ int map_afrom_cp(TALLOC_CTX *ctx, vp_map_t **out, CONF_PAIR *cp,
 		if (slen <= 0) {
 			char *spaces, *text;
 
+			marker_subject = attr;
 		marker:
-			fr_canonicalize_error(ctx, &spaces, &text, slen, attr);
+			fr_canonicalize_error(ctx, &spaces, &text, slen, marker_subject);
 			cf_log_err(cp, "%s", text);
 			cf_log_perr(cp, "%s^", spaces);
 
@@ -245,7 +246,7 @@ int map_afrom_cp(TALLOC_CTX *ctx, vp_map_t **out, CONF_PAIR *cp,
 		slen = tmpl_afrom_attr_str(ctx, NULL, &map->lhs, attr, lhs_rules);
 		if (slen <= 0) {
 			cf_log_err(cp, "Failed parsing attribute reference");
-
+			marker_subject = attr;
 			goto marker;
 		}
 
@@ -266,7 +267,10 @@ int map_afrom_cp(TALLOC_CTX *ctx, vp_map_t **out, CONF_PAIR *cp,
 				 type,
 				 tmpl_parse_rules_unquoted[type],	/* We're not searching for quotes */
 				 rhs_rules);
-	if (slen < 0) goto marker;
+	if (slen < 0) {
+		marker_subject = value;
+		goto marker;
+	}
 	if (tmpl_attr_unknown_add(map->rhs) < 0) {
 		cf_log_perr(cp, "Failed creating attribute %s", map->rhs->name);
 		goto error;
@@ -425,9 +429,6 @@ int map_afrom_cs(TALLOC_CTX *ctx, vp_map_t **out, CONF_SECTION *cs,
 
 			/*
 			 *	Only TLV and GROUP can be grouped.
-			 *
-			 *	@todo - maybe "tagged" too, for stupid
-			 *	RADIUS nonsense?
 			 */
 			if ((tmpl_da(map->lhs)->type != FR_TYPE_TLV) &&
 			    (tmpl_da(map->lhs)->type != FR_TYPE_GROUP)) {

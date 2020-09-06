@@ -927,6 +927,7 @@ static int cond_normalise(TALLOC_CTX *ctx, fr_token_t lhs_type, fr_cond_t **c_ou
 	 */
 	if (c->type == COND_TYPE_EXISTS) {
 		switch (c->data.vpt->type) {
+		case TMPL_TYPE_XLAT:
 		case TMPL_TYPE_XLAT_UNRESOLVED:
 		case TMPL_TYPE_ATTR:
 		case TMPL_TYPE_ATTR_UNRESOLVED:
@@ -1025,7 +1026,7 @@ static int cond_normalise(TALLOC_CTX *ctx, fr_token_t lhs_type, fr_cond_t **c_ou
 			break;
 
 		default:
-			fr_strerror_printf("Internal sanity check failed 2");
+			fr_assert_fail("Internal sanity check failed 2");
 			return -1;
 		}
 	}
@@ -1223,11 +1224,13 @@ static ssize_t cond_tokenize_operand(TALLOC_CTX *ctx, tmpl_t **out,
 		 *	the flags.  Try to compile the
 		 *	regex.
 		 */
-		slen = tmpl_regex_compile(vpt, true, false);
-		if (slen < 0) {
-			fr_sbuff_set(&our_in, &m);	/* Reset to start of expression */
-			fr_sbuff_advance(&our_in, slen * -1);
-			goto error;
+		if (tmpl_is_regex_uncompiled(vpt)) {
+			slen = tmpl_regex_compile(vpt, true, false);
+			if (slen < 0) {
+				fr_sbuff_set(&our_in, &m);	/* Reset to start of expression */
+				fr_sbuff_advance(&our_in, slen * -1);
+				goto error;
+			}
 		}
 	}
 #endif

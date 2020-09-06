@@ -561,6 +561,7 @@ do {\
 	case TMPL_TYPE_UNRESOLVED:
 	case TMPL_TYPE_EXEC:
 	case TMPL_TYPE_XLAT:
+	case TMPL_TYPE_REGEX_XLAT:
 	{
 		ssize_t ret;
 		fr_value_box_t data;
@@ -594,7 +595,6 @@ do {\
 	 *	RHS is a compiled regex, we don't need to do anything with it.
 	 */
 	case TMPL_TYPE_REGEX:
-	case TMPL_TYPE_REGEX_XLAT:
 		CAST(lhs);
 		rcode = cond_cmp_values(request, c, lhs, NULL);
 		break;

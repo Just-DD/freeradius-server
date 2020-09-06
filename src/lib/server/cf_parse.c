@@ -174,7 +174,12 @@ int cf_pair_parse_value(TALLOC_CTX *ctx, void *out, UNUSED void *base, CONF_ITEM
 	}
 
 	if (tmpl) {
-		tmpl_t *vpt;
+		tmpl_t			*vpt;
+		static tmpl_rules_t	rules = {
+						.allow_unknown = true,
+						.allow_unresolved = true,
+						.allow_foreign = true
+					};
 
 		if (!cp->printed) cf_log_debug(cs, "%.*s%s = %s", PAIR_SPACE(cs), parse_spaces, cf_pair_attr(cp), cp->value);
 
@@ -187,19 +192,12 @@ int cf_pair_parse_value(TALLOC_CTX *ctx, void *out, UNUSED void *base, CONF_ITEM
 		 *	xlat strings.
 		 */
 		if (attribute) {
-			slen = tmpl_afrom_attr_str(cp, NULL, &vpt, cf_pair_value(cp),
-						   &(tmpl_rules_t){
-							.allow_unknown = true,
-							.allow_unresolved = true
-						   });
+			slen = tmpl_afrom_attr_str(cp, NULL, &vpt, cf_pair_value(cp), &rules);
 		} else {
 			slen = tmpl_afrom_substr(cp, &vpt, &FR_SBUFF_IN(cf_pair_value(cp), strlen(cf_pair_value(cp))),
 						 cf_pair_value_quote(cp),
 						 tmpl_parse_rules_unquoted[cf_pair_value_quote(cp)],
-						 &(tmpl_rules_t){
-							.allow_unknown = true,
-							.allow_unresolved = true
-						 });
+						 &rules);
 		}
 
 		if (slen < 0) {
@@ -1318,7 +1316,8 @@ static int cf_parse_tmpl_pass2(CONF_SECTION *cs, tmpl_t **out, CONF_PAIR *cp, fr
 				 tmpl_parse_rules_quoted[cf_pair_value_quote(cp)],
 				 &(tmpl_rules_t){
 				 	.allow_unknown = true,
-				 	.allow_unresolved = true
+				 	.allow_unresolved = true,
+				 	.allow_foreign = true
 				 });
 	if (slen < 0) {
 		char *spaces, *text;

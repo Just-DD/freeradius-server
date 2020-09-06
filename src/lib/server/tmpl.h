@@ -106,20 +106,25 @@ typedef enum requests_ref_e {
 extern fr_table_num_sorted_t const request_ref_table[];
 extern size_t request_ref_table_len;
 
+/** Base data type is an attribute reference
+ *
+ */
+#define TMPL_FLAG_ATTR		0x01000000
+
 /** Base data type is an xlat expansion
  *
  */
-#define TMPL_FLAG_XLAT		0x01000000
+#define TMPL_FLAG_XLAT		0x02000000
 
 /** Is a type of regular expression
  *
  */
-#define TMPL_FLAG_REGEX		0x02000000
+#define TMPL_FLAG_REGEX		0x04000000
 
 /** Needs resolution
  *
  */
-#define TMPL_FLAG_UNRESOLVED	0x04000000
+#define TMPL_FLAG_UNRESOLVED	0x08000000
 
 /** Types of #tmpl_t
  *
@@ -144,11 +149,11 @@ typedef enum tmpl_type_e {
 
 	/** Reference to an attribute list
 	 */
-	TMPL_TYPE_LIST			= 0x0004,
+	TMPL_TYPE_LIST			= 0x0004 | TMPL_FLAG_ATTR,
 
 	/** Reference to one or more attributes
 	 */
-	TMPL_TYPE_ATTR			= 0x0008,
+	TMPL_TYPE_ATTR			= 0x0008 | TMPL_FLAG_ATTR,
 
 	/** Pre-parsed xlat expansion
 	 */
@@ -232,6 +237,7 @@ typedef enum tmpl_type_e {
 #define tmpl_is_regex_xlat_unresolved(vpt) 	(vpt->type == TMPL_TYPE_REGEX_XLAT_UNRESOLVED)
 
 #define tmpl_needs_resolving(vpt)		(vpt->type & TMPL_FLAG_UNRESOLVED)
+#define tmpl_contains_attr(vpt)			(vpt->type & TMPL_FLAG_ATTR)
 #define tmpl_contains_regex(vpt)		(vpt->type & TMPL_FLAG_REGEX)
 #define tmpl_contains_xlat(vpt)			(vpt->type & TMPL_FLAG_XLAT)
 
@@ -513,6 +519,8 @@ static inline int16_t tmpl_num(tmpl_t const *vpt)
 	tmpl_assert_type(tmpl_is_attr(vpt) ||
 			 tmpl_is_attr_unresolved(vpt) ||
 			 tmpl_is_list(vpt));
+
+	if (tmpl_is_list(vpt) && (fr_dlist_num_elements(&vpt->data.attribute.ar) == 0)) return NUM_ALL;
 
 	return ((tmpl_attr_t *)fr_dlist_tail(&vpt->data.attribute.ar))->ar_num;
 }

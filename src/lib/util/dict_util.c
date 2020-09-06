@@ -2386,7 +2386,6 @@ fr_dict_t *dict_alloc(TALLOC_CTX *ctx)
 	return dict;
 }
 
-
 /** Decrement the reference count on a previously loaded dictionary
  *
  * @param[in] dict	to free.
@@ -2399,6 +2398,26 @@ int fr_dict_free(fr_dict_t **dict)
 	if (!*dict) return 0;
 
 	ret = talloc_decrease_ref_count(*dict);
+	*dict = NULL;
+
+	return ret;
+}
+
+/** Decrement the reference count on a previously loaded dictionary
+ *
+ * @param[in] dict	to free.
+ * @return how many references to the dictionary remain.
+ */
+int fr_dict_const_free(fr_dict_t const **dict)
+{
+	int ret;
+	fr_dict_t *our_dict;
+
+	if (!*dict) return 0;
+
+	memcpy(&our_dict, dict, sizeof(our_dict));
+
+	ret = talloc_decrease_ref_count(our_dict);
 	*dict = NULL;
 
 	return ret;

@@ -381,7 +381,8 @@ fr_sbuff_escape_rules_t fr_value_escape_double = {
 		['\v'] = 'v'
 	},
 	.esc = {
-		SBUFF_CHAR_UNPRINTABLES_LOW
+		SBUFF_CHAR_UNPRINTABLES_LOW,
+		SBUFF_CHAR_UNPRINTABLES_EXTENDED
 	},
 	.do_utf8 = true,
 	.do_oct = true
@@ -411,7 +412,8 @@ fr_sbuff_escape_rules_t fr_value_escape_solidus = {
 		['\v'] = 'v'
 	},
 	.esc = {
-		SBUFF_CHAR_UNPRINTABLES_LOW
+		SBUFF_CHAR_UNPRINTABLES_LOW,
+		SBUFF_CHAR_UNPRINTABLES_EXTENDED
 	},
 	.do_utf8 = true,
 	.do_oct = true
@@ -432,7 +434,8 @@ fr_sbuff_escape_rules_t fr_value_escape_backtick = {
 		['\v'] = 'v'
 	},
 	.esc = {
-		SBUFF_CHAR_UNPRINTABLES_LOW
+		SBUFF_CHAR_UNPRINTABLES_LOW,
+		SBUFF_CHAR_UNPRINTABLES_EXTENDED
 	},
 	.do_utf8 = true,
 	.do_oct = true
@@ -4986,12 +4989,14 @@ ssize_t fr_value_box_print(fr_sbuff_t *out, fr_value_box_t const *data, fr_sbuff
 
 	switch (data->type) {
 	case FR_TYPE_STRING:
-		FR_SBUFF_IN_ESCAPE_RETURN(&our_out, data->vb_strvalue, data->datum.length, e_rules);
+		if (data->datum.length) FR_SBUFF_IN_ESCAPE_RETURN(&our_out,
+								  data->vb_strvalue, data->datum.length, e_rules);
 		break;
 
 	case FR_TYPE_OCTETS:
 		FR_SBUFF_IN_CHAR_RETURN(&our_out, '0', 'x');
-		FR_SBUFF_RETURN(fr_bin2hex, &our_out, &FR_DBUFF_TMP(data->vb_octets, data->datum.length), SIZE_MAX);
+		if (data->datum.length) FR_SBUFF_RETURN(fr_bin2hex, &our_out,
+							&FR_DBUFF_TMP(data->vb_octets, data->datum.length), SIZE_MAX);
 		break;
 
 	/*
@@ -5245,8 +5250,7 @@ ssize_t fr_value_box_print_quoted(fr_sbuff_t *out, fr_value_box_t const *data, f
 	if (quote == T_BARE_WORD) return fr_value_box_print(out, data, NULL);
 
 	switch (data->type) {
-	case FR_TYPE_STRING:
-	case FR_TYPE_DATE:
+	case FR_TYPE_QUOTED:
 		FR_SBUFF_IN_CHAR_RETURN(&our_out, fr_token_quote[quote]);
 		FR_SBUFF_RETURN(fr_value_box_print, &our_out, data, fr_value_escape_by_quote[quote]);
 		FR_SBUFF_IN_CHAR_RETURN(&our_out, fr_token_quote[quote]);

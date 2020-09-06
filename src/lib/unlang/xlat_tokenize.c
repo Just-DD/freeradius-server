@@ -361,8 +361,8 @@ static inline int xlat_tokenize_function(TALLOC_CTX *ctx, xlat_exp_t **head, xla
 	node = xlat_exp_alloc(ctx, XLAT_FUNC, fr_sbuff_current(&m_s), fr_sbuff_behind(&m_s));
 	if (!func) {
 		if (!rules || !rules->allow_unresolved) {
-			fr_strerror_printf("Unknown function %pV",
-					   fr_box_strvalue_len(fr_sbuff_current(&m_s), fr_sbuff_behind(&m_s)));
+			fr_strerror_printf("Unknown expansion function");
+			fr_sbuff_set(in, &m_s);
 			return -1;
 		}
 		xlat_exp_set_type(node, XLAT_FUNC_UNRESOLVED);
@@ -445,10 +445,7 @@ static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, xl
 		 *	as it was more likely to be a bad module name,
 		 *	than a request qualifier.
 		 */
-		if (err == ATTR_REF_ERROR_MISSING_TERMINATOR) {
-			fr_strerror_printf("Unknown text after attribute");
-			fr_sbuff_set(in, &m_s);
-		}
+		if (err == ATTR_REF_ERROR_MISSING_TERMINATOR) fr_sbuff_set(in, &m_s);
 	error:
 		*head = NULL;
 		fr_sbuff_marker_release(&m_s);
@@ -466,8 +463,8 @@ static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, xl
 	 *	specified so that the virtual attribute can operate
 	 *	in different contexts (i.e. on the parent request).
 	 */
-	if ((tmpl_attr_ref_count(vpt) == 1) &&
-	    (tmpl_is_attr_unresolved(vpt) || (tmpl_is_attr(vpt) && tmpl_da(vpt)->flags.virtual))) {
+	if ((tmpl_is_attr_unresolved(vpt) || (tmpl_is_attr(vpt) && tmpl_da(vpt)->flags.virtual)) &&
+	    (tmpl_attr_ref_count(vpt) == 1)) {
 	    	if (tmpl_is_attr_unresolved(vpt)) {
 			func = xlat_func_find(tmpl_attr_unresolved(vpt), -1);
 		} else {
@@ -498,7 +495,7 @@ static inline int xlat_tokenize_attribute(TALLOC_CTX *ctx, xlat_exp_t **head, xl
 		if (!ar_rules || !ar_rules->allow_unresolved) {
 			talloc_free(vpt);
 
-			fr_strerror_printf("Unknown attribute");
+			fr_strerror_printf("Unresolved attributes not allowed in expansions here");
 			fr_sbuff_set(in, &m_s);		/* Error at the start of the attribute */
 			goto error;
 		}
@@ -1412,15 +1409,34 @@ int xlat_resolve(xlat_exp_t **head, xlat_flags_t *flags, bool allow_unresolved)
 			xlat_flags_merge(&child_flags, &alt_flags);
 			node->flags = child_flags;
 		}
-			return 0;
+			break;
+
+		/*
+		 *	A resolved function with unresolved args
+		 */
+		case XLAT_FUNC:
+			if (xlat_resolve(&node->child, &node->flags, allow_unresolved) < 0) return -1;
+			xlat_flags_merge(&our_flags, &node->flags);
+			break;
 
 		/*
 		 *	An unresolved function.
 		 */
 		case XLAT_FUNC_UNRESOLVED:
 		{
-			xlat_t *func;
+			xlat_t		*func;
+			xlat_flags_t	child_flags = node->flags;
 
+
+			/*
+			 *	We can't tell if it's just the function
+			 *	that needs resolving or its children too.
+			 */
+			if (xlat_resolve(&node->child, &child_flags, allow_unresolved) < 0) return -1;
+
+			/*
+			 *	Try and find the function
+			 */
 			func = xlat_func_find(node->fmt, talloc_array_length(node->fmt) - 1);
 			if (!func) {
 				/*
@@ -1444,11 +1460,16 @@ int xlat_resolve(xlat_exp_t **head, xlat_flags_t *flags, bool allow_unresolved)
 			node->flags = (xlat_flags_t){ .needs_async = func->needs_async };
 
 			/*
+			 *	Merge the result of trying to resolve
+			 *	the child nodes.
+			 */
+			xlat_flags_merge(&node->flags, &child_flags);
+
+			/*
 			 *	Add the freshly resolved function
 			 *	to the bootstrap tree.
 			 */
 			if (xlat_bootstrap_func(node) < 0) return -1;
-
 		}
 			break;
 		/*
@@ -1511,7 +1532,7 @@ int xlat_resolve(xlat_exp_t **head, xlat_flags_t *flags, bool allow_unresolved)
 		xlat_flags_merge(&our_flags, &node->flags);
 	}
 
-	xlat_flags_merge(flags, &our_flags);	/* Update parent flags */
+	*flags = our_flags;	/* Update parent flags - not merge, replacement */
 
 	return 0;
 }

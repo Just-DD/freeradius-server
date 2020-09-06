@@ -151,7 +151,7 @@ default_actions[MOD_COUNT][RLM_MODULE_NUMCODES] =
 	}
 };
 
-static bool pass2_fixup_tmpl(TALLOC_CTX *ctx, tmpl_t **vpt_p)
+static bool pass2_fixup_tmpl(TALLOC_CTX *ctx, CONF_ITEM const *ci, tmpl_t **vpt_p)
 {
 	tmpl_t *vpt = *vpt_p;
 
@@ -166,7 +166,10 @@ static bool pass2_fixup_tmpl(TALLOC_CTX *ctx, tmpl_t **vpt_p)
 	/*
 	 *	Fixup any other tmpl types
 	 */
-	if (tmpl_resolve(vpt) < 0) return false;
+	if (tmpl_resolve(vpt) < 0) {
+		cf_log_perr(ci, NULL);
+		return false;
+	}
 
 	return true;
 }
@@ -174,7 +177,7 @@ static bool pass2_fixup_tmpl(TALLOC_CTX *ctx, tmpl_t **vpt_p)
 static bool pass2_fixup_map(fr_cond_t *c)
 {
 	tmpl_t		*vpt;
-	vp_map_t		*map;
+	vp_map_t	*map;
 
 	map = c->data.map;	/* shorter */
 
@@ -205,12 +208,12 @@ static bool pass2_fixup_map(fr_cond_t *c)
 		 *	Resolve the attribute references first
 		 */
 		if (tmpl_is_attr_unresolved(map->lhs)) {
-			if (!pass2_fixup_tmpl(map, &map->lhs)) return false;
+			if (!pass2_fixup_tmpl(map, map->ci, &map->lhs)) return false;
 			if (!cast) cast = tmpl_da(map->lhs);
 		}
 
 		if (tmpl_is_attr_unresolved(map->rhs)) {
-			if (!pass2_fixup_tmpl(map, &map->rhs)) return false;
+			if (!pass2_fixup_tmpl(map, map->ci, &map->rhs)) return false;
 			if (!cast) cast = tmpl_da(map->rhs);
 		}
 
@@ -292,11 +295,11 @@ static bool pass2_fixup_map(fr_cond_t *c)
 		 *	@todo v3.1: allow anything anywhere.
 		 */
 		if (!tmpl_is_unresolved(map->rhs)) {
-			if (!pass2_fixup_tmpl(map, &map->lhs)) {
+			if (!pass2_fixup_tmpl(map, map->ci, &map->lhs)) {
 				return false;
 			}
 		} else {
-			if (!pass2_fixup_tmpl(map, &map->lhs)) {
+			if (!pass2_fixup_tmpl(map, map->ci, &map->lhs)) {
 				return false;
 			}
 
@@ -369,20 +372,20 @@ static bool pass2_fixup_map(fr_cond_t *c)
 
 			if (!c->cast) da = tmpl_da(map->lhs);
 
-			if (!pass2_fixup_tmpl(map, &map->rhs)) return false;
+			if (!pass2_fixup_tmpl(map, map->ci, &map->rhs)) return false;
 		} else {
-			if (!pass2_fixup_tmpl(map, &map->rhs)) return false;
+			if (!pass2_fixup_tmpl(map, map->ci, &map->rhs)) return false;
 		}
 	}
 
 	if (tmpl_is_exec_unresolved(map->lhs)) {
-		if (!pass2_fixup_tmpl(map, &map->lhs)) {
+		if (!pass2_fixup_tmpl(map, map->ci, &map->lhs)) {
 			return false;
 		}
 	}
 
 	if (tmpl_is_exec_unresolved(map->rhs)) {
-		if (!pass2_fixup_tmpl(map, &map->rhs)) {
+		if (!pass2_fixup_tmpl(map, map->ci, &map->rhs)) {
 			return false;
 		}
 	}
@@ -423,7 +426,7 @@ static bool pass2_fixup_map(fr_cond_t *c)
 
 #ifdef HAVE_REGEX
 	if (tmpl_is_regex_xlat_unresolved(map->rhs)) {
-		if (!pass2_fixup_tmpl(map, &map->rhs)) {
+		if (!pass2_fixup_tmpl(map, map->ci, &map->rhs)) {
 			return false;
 		}
 	}
@@ -505,7 +508,7 @@ static bool pass2_cond_callback(fr_cond_t *c, UNUSED void *uctx)
 	 */
 	case COND_TYPE_EXISTS:
 		fr_assert(!tmpl_is_regex_xlat_unresolved(c->data.vpt));
-		return pass2_fixup_tmpl(c, &c->data.vpt);
+		return pass2_fixup_tmpl(c, c->ci, &c->data.vpt);
 
 	/*
 	 *	Fixup the map
@@ -531,13 +534,13 @@ static bool pass2_fixup_update_map(vp_map_t *map, tmpl_rules_t const *rules, fr_
 		 *	FIXME: compile to attribute && handle
 		 *	the conversion in map_to_vp().
 		 */
-		if (!pass2_fixup_tmpl(map, &map->lhs)) {
+		if (!pass2_fixup_tmpl(map, map->ci, &map->lhs)) {
 			return false;
 		}
 	}
 
 	if (tmpl_is_exec(map->lhs)) {
-		if (!pass2_fixup_tmpl(map, &map->lhs)) {
+		if (!pass2_fixup_tmpl(map, map->ci, &map->lhs)) {
 			return false;
 		}
 	}
@@ -546,7 +549,7 @@ static bool pass2_fixup_update_map(vp_map_t *map, tmpl_rules_t const *rules, fr_
 	 *	Deal with undefined attributes now.
 	 */
 	if (tmpl_is_attr_unresolved(map->lhs)) {
-		if (!pass2_fixup_tmpl(map, &map->lhs)) return false;
+		if (!pass2_fixup_tmpl(map, map->ci, &map->lhs)) return false;
 	}
 
 	/*
@@ -593,7 +596,7 @@ static bool pass2_fixup_update_map(vp_map_t *map, tmpl_rules_t const *rules, fr_
 			 *	FIXME: compile to attribute && handle
 			 *	the conversion in map_to_vp().
 			 */
-			if (!pass2_fixup_tmpl(map, &map->rhs)) {
+			if (!pass2_fixup_tmpl(map, map->ci, &map->rhs)) {
 				return false;
 			}
 		}
@@ -601,11 +604,11 @@ static bool pass2_fixup_update_map(vp_map_t *map, tmpl_rules_t const *rules, fr_
 		fr_assert(!tmpl_is_regex_xlat_unresolved(map->rhs));
 
 		if (tmpl_is_attr_unresolved(map->rhs)) {
-			if (!pass2_fixup_tmpl(map, &map->rhs)) return false;
+			if (!pass2_fixup_tmpl(map, map->ci, &map->rhs)) return false;
 		}
 
 		if (tmpl_is_exec(map->rhs)) {
-			if (!pass2_fixup_tmpl(map, &map->rhs)) {
+			if (!pass2_fixup_tmpl(map, map->ci, &map->rhs)) {
 				return false;
 			}
 		}
@@ -661,7 +664,7 @@ static bool pass2_fixup_map_rhs(unlang_group_t *g, tmpl_rules_t const *rules)
 	 */
 	if (!g->vpt) return true;
 
-	return pass2_fixup_tmpl(g->map->ci, &g->vpt);
+	return pass2_fixup_tmpl(g->map->ci, cf_section_to_item(g->cs), &g->vpt);
 }
 
 static void unlang_dump(unlang_t *instruction, int depth)
@@ -1921,7 +1924,7 @@ static unlang_t *compile_switch(UNUSED unlang_t *parent, unlang_compile_t *unlan
 	 *	This is so that compile_case() can do attribute type
 	 *	checks / casts against us.
 	 */
-	if (!pass2_fixup_tmpl(g, &g->vpt)) {
+	if (!pass2_fixup_tmpl(g, cf_section_to_item(cs), &g->vpt)) {
 		talloc_free(g);
 		return NULL;
 	}
@@ -2048,7 +2051,7 @@ static unlang_t *compile_case(unlang_t *parent, unlang_compile_t *unlang_ctx, CO
 		}
 
 		if (tmpl_is_attr_unresolved(vpt)) {
-			if (!pass2_fixup_tmpl(parent, &vpt)) {
+			if (!pass2_fixup_tmpl(parent, cf_section_to_item(cs), &vpt)) {
 				talloc_free(vpt);
 				return NULL;
 			}
@@ -2090,14 +2093,14 @@ static unlang_t *compile_case(unlang_t *parent, unlang_compile_t *unlang_ctx, CO
 			 *	Don't expand xlat's into an
 			 *	attribute of a different type.
 			 */
-			if (!pass2_fixup_tmpl(parent, &vpt)) {
+			if (!pass2_fixup_tmpl(parent, cf_section_to_item(cs), &vpt)) {
 				talloc_free(vpt);
 				return NULL;
 			}
 		}
 
 		if (tmpl_is_exec(vpt)) {
-			if (!pass2_fixup_tmpl(parent, &vpt)) {
+			if (!pass2_fixup_tmpl(parent, cf_section_to_item(cs), &vpt)) {
 				talloc_free(vpt);
 				return NULL;
 			}
@@ -2568,7 +2571,7 @@ static unlang_t *compile_load_balance_subsection(unlang_t *parent, unlang_compil
 		/*
 		 *	Fixup the templates
 		 */
-		if (!pass2_fixup_tmpl(g, &g->vpt)) {
+		if (!pass2_fixup_tmpl(g, cf_section_to_item(cs), &g->vpt)) {
 			talloc_free(g);
 			return NULL;
 		}

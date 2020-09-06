@@ -307,7 +307,7 @@ int xlat_register_legacy(void *mod_inst, char const *name,
 	c->mod_inst = mod_inst;
 	c->instantiate = instantiate;
 	c->inst_size = inst_size;
-	c->needs_async = true;
+	c->needs_async = false;
 
 	DEBUG3("%s: %s", __FUNCTION__, c->name);
 

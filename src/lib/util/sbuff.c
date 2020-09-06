@@ -449,7 +449,7 @@ static inline bool fr_sbuff_terminal_search(fr_sbuff_t *in, char const *p,
 		elem = term->elem[mid].str;
 		tlen = strlen(elem);
 
-		ret = strncasecmp(p, elem, tlen < (size_t)remaining ? tlen : (size_t)remaining);
+		ret = strncmp(p, elem, tlen < (size_t)remaining ? tlen : (size_t)remaining);
 		if (ret == 0) {
 			/*
 			 *	If we have more text than the table element, that's fine
