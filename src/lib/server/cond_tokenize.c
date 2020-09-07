@@ -400,9 +400,26 @@ static ssize_t cond_check_attrs(fr_cond_t *c, fr_sbuff_marker_t *m_lhs, fr_sbuff
 	 *	Attribute comparison with a box
 	 */
 	if (TMPL_OF_TYPE_A_B(attr, data)) {
-		if (tmpl_cast_in_place(data, tmpl_da(attr)->type, tmpl_da(attr)) < 0) {
+		fr_type_t		type = tmpl_da(attr)->type;
+
+		/*
+		 *	Most of the time the box type takes
+		 *	precedence, except in the case of a few types
+		 *	like IP prefixes.
+		 */
+		switch (tmpl_value_type(data)) {
+		case FR_TYPE_IPV4_PREFIX:
+		case FR_TYPE_IPV6_PREFIX:
+			type = tmpl_value_type(data);
+			break;
+
+		default:
+			break;
+		}
+
+		if (tmpl_cast_in_place(data, type, tmpl_da(attr)) < 0) {
 			fr_strerror_printf_push("Failed casting data to match attribute");
-			return data == lhs ? fr_sbuff_used(m_lhs) : fr_sbuff_used(m_rhs);
+			return -(data == lhs ? fr_sbuff_used(m_lhs) : fr_sbuff_used(m_rhs));
 		}
 	}
 
