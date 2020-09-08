@@ -65,6 +65,15 @@ fr_table_num_ordered_t const tmpl_type_table[] = {
 };
 size_t tmpl_type_table_len = NUM_ELEMENTS(tmpl_type_table);
 
+/** Attr ref types
+ */
+fr_table_num_ordered_t const attr_ref_table[] = {
+	{ L("normal"),		TMPL_ATTR_TYPE_NORMAL		},
+	{ L("unknown"),		TMPL_ATTR_TYPE_UNKNOWN		},
+	{ L("unresolved"),	TMPL_ATTR_TYPE_UNRESOLVED	}
+};
+size_t attr_ref_table_len = NUM_ELEMENTS(attr_ref_table);
+
 /** Map keywords to #pair_list_t values
  */
 fr_table_num_ordered_t const pair_list_table[] = {
@@ -96,6 +105,8 @@ static fr_table_num_sorted_t const attr_num_table[] = {
 	{ L("n"),		NUM_LAST			}
 };
 static size_t attr_num_table_len = NUM_ELEMENTS(attr_num_table);
+
+static void tmpl_attr_ref_to_raw(tmpl_t *vpt, tmpl_attr_t *ref);
 
 void tmpl_attr_debug(tmpl_t const *vpt)
 {
@@ -148,16 +159,18 @@ void tmpl_attr_debug(tmpl_t const *vpt)
 		case TMPL_ATTR_TYPE_NORMAL:
 		case TMPL_ATTR_TYPE_UNKNOWN:
 			if (!ar->da) {
-				INFO("\t[%u] null%s%s%s",
+				INFO("\t[%u] %s null%s%s%s",
 				     i,
+				     fr_table_str_by_value(attr_ref_table, ar->type, "<INVALID>"),
 				     ar->num != NUM_ANY ? "[" : "",
 			     	     ar->num != NUM_ANY ? fr_table_str_by_value(attr_num_table, ar->num, buffer) : "",
 			     	     ar->num != NUM_ANY ? "]" : "");
 				goto next;
 			}
 
-			INFO("\t[%u] %s %s%s%s%s (%u)",
+			INFO("\t[%u] %s %s %s%s%s%s (%u)",
 			     i,
+			     fr_table_str_by_value(attr_ref_table, ar->type, "<INVALID>"),
 			     fr_table_str_by_value(fr_value_box_type_table, ar->da->type, "<INVALID>"),
 			     ar->da->name,
 			     ar->num != NUM_ANY ? "[" : "",
@@ -172,15 +185,18 @@ void tmpl_attr_debug(tmpl_t const *vpt)
 
 
 		case TMPL_ATTR_TYPE_UNRESOLVED:
-			INFO("\t[%u] %s%s%s%s - unresolved",
-			     i, ar->unknown.name,
+			INFO("\t[%u] %s %s%s%s%s - unresolved",
+			     i,
+			     fr_table_str_by_value(attr_ref_table, ar->type, "<INVALID>"),
+			     ar->ar_unresolved,
 			     ar->num != NUM_ANY ? "[" : "",
 			     ar->num != NUM_ANY ? fr_table_str_by_value(attr_num_table, ar->num, buffer) : "",
 			     ar->num != NUM_ANY ? "]" : "");
 			break;
 
 		default:
-			INFO("\t[%u] Bad type %u", i, ar->type);
+			INFO("\t[%u] Bad type %s(%u)",
+			     i, fr_table_str_by_value(attr_ref_table, ar->type, "<INVALID>"), ar->type);
 			break;
 		}
 
@@ -243,9 +259,14 @@ void tmpl_debug(tmpl_t const *vpt)
 		break;
 
 	default:
-		if (vpt->type & TMPL_FLAG_UNRESOLVED) {
-			INFO("\tunresolved : %pR", fr_box_strvalue_len(vpt->name, vpt->len));
-			INFO("\tlen        : %zu", vpt->len);
+		if (tmpl_needs_resolving(vpt)) {
+			if (tmpl_is_unresolved(vpt)) {
+				INFO("\tunescaped  : %pR", fr_box_strvalue_buffer(vpt->data.unescaped));
+				INFO("\tlen        : %zu", talloc_array_length(vpt->data.unescaped) - 1);
+			} else {
+				INFO("\tunresolved : %pR", fr_box_strvalue_len(vpt->name, vpt->len));
+				INFO("\tlen        : %zu", vpt->len);
+			}
 		} else {
 			INFO("debug nyi");
 		}
@@ -978,9 +999,9 @@ int tmpl_attr_set_leaf_da(tmpl_t *vpt, fr_dict_attr_t const *da)
 	/*
 	 *	Unknown attributes get copied
 	 */
-	if (da->flags.is_unknown || (parent && parent->ar_da->flags.is_unknown)) {
+	if (da->flags.is_unknown) {
 		ref->type = TMPL_ATTR_TYPE_UNKNOWN;
-		ref->da= ref->ar_unknown = fr_dict_unknown_acopy(vpt, da);
+		ref->da = ref->ar_unknown = fr_dict_unknown_acopy(vpt, da);
 	} else {
 		ref->type = TMPL_ATTR_TYPE_NORMAL;
 		ref->da = da;
@@ -1896,8 +1917,8 @@ ssize_t tmpl_afrom_attr_substr(TALLOC_CTX *ctx, attr_ref_error_t *err,
 	size_t		list_len;
 	tmpl_t		*vpt;
 	fr_sbuff_t	our_name = FR_SBUFF_NO_ADVANCE(name);	/* Take a local copy in case we need to back track */
-	bool		is_raw = false;
 	bool		ref_prefix = false;
+	bool		is_raw = false;
 
 	if (!ar_rules) ar_rules = &default_attr_ref_rules;	/* Use the defaults */
 
@@ -1940,15 +1961,16 @@ ssize_t tmpl_afrom_attr_substr(TALLOC_CTX *ctx, attr_ref_error_t *err,
 
 	/*
 	 *	For backwards compatibility strip off "Attr-"
+	 */
+	(void)fr_sbuff_adv_past_strcase_literal(&our_name, "Attr-");
+
+	/*
 	 *	The "raw." prefix marks up the leaf attribute
 	 *	as unknown if it wasn't already which allows
 	 *	users to stick whatever they want in there as
 	 *	a value.
 	 */
-	if (!fr_sbuff_adv_past_strcase_literal(&our_name, "Attr-") &&
-	    fr_sbuff_adv_past_strcase_literal(&our_name, "raw.")) {
-		is_raw = true;
-	}
+	if (fr_sbuff_adv_past_strcase_literal(&our_name, "raw.")) is_raw = true;
 
 	/*
 	 *	Parse one or more request references
@@ -1987,14 +2009,19 @@ ssize_t tmpl_afrom_attr_substr(TALLOC_CTX *ctx, attr_ref_error_t *err,
 	    (((fr_sbuff_next_if_char(&our_name, ':') && (vpt->data.attribute.old_list_sep = true)) ||
 	     fr_sbuff_next_if_char(&our_name, '.')) && fr_sbuff_is_in_charset(&our_name, fr_dict_attr_allowed_chars))) {
 		ret = tmpl_attr_ref_afrom_attr_substr(vpt, err,
-						       vpt, NULL, &our_name, ar_rules, 0);
+						      vpt, NULL, &our_name, ar_rules, 0);
 		if (ret < 0) goto error;
 
 		/*
-		 *	Check to see if the user wants the leaf attribute
-		 *	to be raw.
+		 *	Check to see if the user wants the leaf
+		 *	attribute to be raw.
+		 *
+		 *	We can only do the conversion now _if_
+		 *	the complete hierarchy has been resolved
+		 *	otherwise we'll need to do the conversion
+		 *	later.
 		 */
-		if (is_raw) tmpl_attr_to_raw(vpt);
+		if (tmpl_is_attr(vpt) && is_raw) tmpl_attr_to_raw(vpt);
 	}
 
 	/*
@@ -2565,11 +2592,20 @@ ssize_t tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 		if (slen > 0) goto done_bareword;
 
 		/*
+		 *	See if it's an attribute reference
+		 *	without the prefix.
+		 */
+		slen = tmpl_afrom_attr_substr(ctx, NULL, out, &our_in, p_rules, ar_rules);
+		if (slen > 0) goto done_bareword;
+
+		/*
 		 *	If it doesn't match any other type
 		 *	of bareword, assume it's an enum
 		 *	value.
 		 */
-		slen = fr_sbuff_out_aunescape_until(vpt, &str, &our_in, SIZE_MAX, p_rules->terminals, p_rules->escapes);
+		slen = fr_sbuff_out_aunescape_until(vpt, &str, &our_in, SIZE_MAX,
+						    p_rules ? p_rules->terminals : NULL,
+						    p_rules ? p_rules->escapes : NULL);
 		if (slen == 0) {
 			fr_strerror_printf("Empty bareword is invalid");
 			return 0;
@@ -2583,7 +2619,9 @@ ssize_t tmpl_afrom_substr(TALLOC_CTX *ctx, tmpl_t **out,
 
 	case T_SINGLE_QUOTED_STRING:
 		vpt = tmpl_alloc_null(ctx);
-		slen = fr_sbuff_out_aunescape_until(vpt, &str, &our_in, SIZE_MAX, p_rules->terminals, p_rules->escapes);
+		slen = fr_sbuff_out_aunescape_until(vpt, &str, &our_in, SIZE_MAX,
+						    p_rules ? p_rules->terminals : NULL,
+						    p_rules ? p_rules->escapes : NULL);
 		tmpl_init(vpt, TMPL_TYPE_UNRESOLVED, quote, fr_sbuff_start(&our_in), slen);
 		vpt->data.unescaped = str;
 		break;
@@ -2914,7 +2952,7 @@ static inline CC_HINT(always_inline) int tmpl_attr_resolve(tmpl_t *vpt)
 	 */
 	ar = fr_dlist_head(&vpt->data.attribute.ar);
 	if (fr_dict_attr_by_qualified_name(&da, vpt->rules.dict_def,
-					   ar->unknown.name, true) != FR_DICT_ATTR_OK) {
+					   ar->ar_unresolved, true) != FR_DICT_ATTR_OK) {
 		parent = fr_dict_root(vpt->rules.dict_def);
 		goto unknown;
 	} else {
@@ -2928,9 +2966,14 @@ static inline CC_HINT(always_inline) int tmpl_attr_resolve(tmpl_t *vpt)
 	 */
 	while ((ar = fr_dlist_next(&vpt->data.attribute.ar, ar))) {
 		ssize_t		slen;
+		bool		is_raw;
+
+		if ((ar->type == TMPL_ATTR_TYPE_NORMAL) || (ar->type == TMPL_ATTR_TYPE_UNKNOWN)) break;
+
+		is_raw = ar->ar_unresolved_raw;
 
 		slen = fr_dict_attr_child_by_name_substr(NULL, &da, parent,
-							 &FR_SBUFF_IN(ar->unknown.name, strlen(ar->unknown.name)),
+							 &FR_SBUFF_IN(ar->ar_unresolved, strlen(ar->ar_unresolved)),
 							 false);
 		if (slen <= 0) {
 			fr_dict_attr_t	*unknown_da;
@@ -2939,8 +2982,8 @@ static inline CC_HINT(always_inline) int tmpl_attr_resolve(tmpl_t *vpt)
 			/*
 			 *	Can't find it under its regular name.  Try an unknown attribute.
 			 */
-			slen = fr_dict_unknown_afrom_oid_str(vpt, &unknown_da, parent, ar->unknown.name);
-			if ((slen <= 0) || (ar->unknown.name[slen] != '\0')) {
+			slen = fr_dict_unknown_afrom_oid_str(vpt, &unknown_da, parent, ar->ar_unresolved);
+			if ((slen <= 0) || (ar->ar_unresolved[slen] != '\0')) {
 				fr_strerror_printf_push("Failed resolving unresolved attribute");
 				return -1;
 			}
@@ -2955,8 +2998,14 @@ static inline CC_HINT(always_inline) int tmpl_attr_resolve(tmpl_t *vpt)
 		 *	Known attribute, just rewrite.
 		 */
 		ar->da = da;
-		ar->type = TMPL_ATTR_TYPE_NORMAL;
 		parent = ar->da;
+
+		/*
+		 *	If the user wanted the leaf
+		 *	to be raw, and it's not, correct
+		 *	that now.
+		 */
+		if (is_raw) tmpl_attr_ref_to_raw(vpt, ar);
 	}
 
 	vpt->type ^= TMPL_FLAG_UNRESOLVED;
@@ -3019,8 +3068,10 @@ int tmpl_resolve(tmpl_t *vpt)
 	 *	Convert unresolved tmpls into literal string values.
 	 */
 	} else if (tmpl_is_unresolved(vpt)) {
+		char *unescaped = vpt->data.unescaped;	/* Copy the pointer before zeroing the union */
+
 		fr_value_box_init_null(&vpt->data.literal);
-		fr_value_box_bstrdup_buffer_shallow(NULL, &vpt->data.literal, NULL, vpt->data.unescaped, false);
+		fr_value_box_bstrdup_buffer_shallow(NULL, &vpt->data.literal, NULL, unescaped, false);
 		vpt->type = TMPL_TYPE_DATA;
 	}
 
@@ -3127,14 +3178,10 @@ int tmpl_attr_to_xlat(TALLOC_CTX *ctx, tmpl_t **vpt_p)
 	return 0;
 }
 
-/** Covert the leaf attribute of a tmpl to a unknown/raw type
- *
- */
-void tmpl_attr_to_raw(tmpl_t *vpt)
+static void tmpl_attr_ref_to_raw(tmpl_t *vpt, tmpl_attr_t *ref)
 {
-	tmpl_attr_t *ref;
+	if (!ref) return;
 
-	ref = fr_dlist_tail(&vpt->data.attribute.ar);
 	switch (ref->type) {
 	case TMPL_ATTR_TYPE_NORMAL:
 	{
@@ -3150,7 +3197,7 @@ void tmpl_attr_to_raw(tmpl_t *vpt)
 		ref->da = ref->ar_unknown = da = fr_dict_unknown_acopy(vpt, ref->da);
 		ref->ar_unknown->type = FR_TYPE_OCTETS;
 		ref->ar_unknown->flags.is_raw = 1;
-		ref->ar_unknown->flags.is_unknown = 0;
+		ref->ar_unknown->flags.is_unknown = 1;
 
 		talloc_const_free(da->name);
 		MEM(da->name = talloc_bstrndup(da, buffer, p - buffer));
@@ -3165,11 +3212,19 @@ void tmpl_attr_to_raw(tmpl_t *vpt)
 		break;
 
 	case TMPL_ATTR_TYPE_UNRESOLVED:
-		fr_assert(0);
+		ref->ar_unresolved_raw = true;
 		break;
 	}
 
 	TMPL_ATTR_VERIFY(vpt);
+}
+
+/** Covert the leaf attribute of a tmpl to a unknown/raw type
+ *
+ */
+void tmpl_attr_to_raw(tmpl_t *vpt)
+{
+	tmpl_attr_ref_to_raw(vpt, fr_dlist_tail(&vpt->data.attribute.ar));
 }
 
 /** Convert an abstract da into a concrete one
@@ -3222,13 +3277,14 @@ int tmpl_attr_unknown_add(tmpl_t *vpt)
 
 	if (!vpt) return 1;
 
-	TMPL_VERIFY(vpt);
+	tmpl_assert_type(tmpl_is_attr(vpt));
 
-	if (!tmpl_is_attr(vpt)) return 1;
+	TMPL_VERIFY(vpt);
 
 	if (!tmpl_da(vpt)->flags.is_unknown) return 1;
 
-	da = fr_dict_unknown_add(fr_dict_unconst(fr_dict_internal()), tmpl_da(vpt));
+	da = tmpl_da(vpt);
+	da = fr_dict_unknown_add(fr_dict_unconst(fr_dict_by_da(da)), da);
 	if (!da) return -1;
 	tmpl_attr_set_leaf_da(vpt, da);
 
@@ -3314,6 +3370,8 @@ ssize_t tmpl_regex_compile(tmpl_t *vpt, bool subcaptures, bool runtime)
 
 	vpt->type = TMPL_TYPE_REGEX;
 
+	TMPL_VERIFY(vpt);
+
 	return slen;
 }
 #endif
@@ -3340,7 +3398,7 @@ ssize_t tmpl_regex_compile(tmpl_t *vpt, bool subcaptures, bool runtime)
  *	- 0 invalid argument.
  *	- <0 the number of bytes we would have needed to complete the print.
  */
-ssize_t tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_prefix_t ar_prefix)
+ssize_t tmpl_attr_print(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_prefix_t ar_prefix)
 {
 	tmpl_request_t		*rr = NULL;
 	tmpl_attr_t		*ar = NULL;
@@ -3404,18 +3462,22 @@ ssize_t tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_pr
 	 *	we add the .unknown prefix.
 	 *
 	 */
-	ar = fr_dlist_tail(&vpt->data.attribute.ar);
-	if (ar && (ar->type == TMPL_ATTR_TYPE_UNKNOWN)) {
-		if (ar->ar_da->flags.is_raw) {
-			FR_SBUFF_IN_STRCPY_LITERAL_RETURN(&our_out, "raw.");
-		} else if (ar->ar_da->flags.is_unknown) {
-			FR_SBUFF_IN_STRCPY_LITERAL_RETURN(&our_out, "unknown.");
+	if (tmpl_contains_attr(vpt) && (ar = fr_dlist_tail(&vpt->data.attribute.ar))) {
+		switch (ar->type) {
+		case TMPL_ATTR_TYPE_NORMAL:
+		case TMPL_ATTR_TYPE_UNKNOWN:
+			if (ar->ar_da->flags.is_raw) FR_SBUFF_IN_STRCPY_LITERAL_RETURN(&our_out, "raw.");
+			break;
+
+		case TMPL_ATTR_TYPE_UNRESOLVED:
+			if (ar->ar_unresolved_raw) FR_SBUFF_IN_STRCPY_LITERAL_RETURN(&our_out, "raw.");
+			break;
 		}
+		ar = NULL;
 	}
-	ar = NULL;
 
 	/*
-	 *	Print attribute identifies
+	 *	Print attribute identifiers
 	 */
 	while ((ar = fr_dlist_next(&vpt->data.attribute.ar, ar))) {
 		switch(ar->type) {
@@ -3423,6 +3485,7 @@ ssize_t tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_pr
 		 *	For normal attributes we use the name
 		 */
 		case TMPL_ATTR_TYPE_NORMAL:
+			if (ar->ar_da->flags.is_raw) goto do_raw;
 			FR_SBUFF_IN_BSTRCPY_BUFFER_RETURN(&our_out, ar->ar_da->name);
 			break;
 
@@ -3430,6 +3493,7 @@ ssize_t tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_pr
 		 *	For unknown attributes we use the number
 		 */
 		case TMPL_ATTR_TYPE_UNKNOWN:
+		do_raw:
 			/*
 			 *	We need some context for unknown attributes
 			 *	so print the first known attribute.
@@ -3521,7 +3585,7 @@ ssize_t tmpl_print(fr_sbuff_t *out, tmpl_t const *vpt,
 	case TMPL_TYPE_LIST:
 	case TMPL_TYPE_ATTR_UNRESOLVED:
 	case TMPL_TYPE_ATTR:
-		FR_SBUFF_RETURN(tmpl_print_attr_str, &our_out, vpt, ar_prefix);
+		FR_SBUFF_RETURN(tmpl_attr_print, &our_out, vpt, ar_prefix);
 		break;
 
 	case TMPL_TYPE_DATA:
@@ -4515,7 +4579,7 @@ void tmpl_attr_verify(char const *file, int line, tmpl_t const *vpt)
 				    "CONSISTENCY CHECK FAILED %s[%u]:  Looping reference list found.  "
 				    "Fast pointer hit slow pointer at \"%s\"",
 				    file, line,
-				    slow->type == TMPL_ATTR_TYPE_UNRESOLVED ? slow->unknown.name :
+				    slow->type == TMPL_ATTR_TYPE_UNRESOLVED ? slow->ar_unresolved :
 				    slow->da ? slow->da->name : "(null-attr)");
 	}
 
@@ -4546,7 +4610,7 @@ void tmpl_attr_verify(char const *file, int line, tmpl_t const *vpt)
 						     "in attr ref list",
 						     file, line,
 						     ar->da->name,
-						     ar->unknown.name);
+						     ar->ar_unresolved);
 			}
 			break;
 
@@ -4563,7 +4627,7 @@ void tmpl_attr_verify(char const *file, int line, tmpl_t const *vpt)
 						     "occurred after unresolved attribute "
 						     "in attr ref list",
 						     file, line, ar->da->name,
-						     ar->unknown.name);
+						     ar->ar_unresolved);
 			}
 			break;
 		}
@@ -4625,6 +4689,10 @@ void tmpl_verify(char const *file, int line, tmpl_t const *vpt)
 		break;
 
 	case TMPL_TYPE_UNRESOLVED:
+		if (!vpt->data.unescaped) {
+			fr_fatal_assert_fail("CONSISTENCY CHECK FAILED %s[%u]: TMPL_TYPE_UNRESOLVED "
+					     "unescaped field is NULL", file, line);
+		 }
 		break;
 
 	case TMPL_TYPE_XLAT_UNRESOLVED:
@@ -4713,7 +4781,7 @@ void tmpl_verify(char const *file, int line, tmpl_t const *vpt)
 
 			da = fr_dict_attr_by_name(dict, tmpl_da(vpt)->name);
 			if (!da) {
-				if (!tmpl_da(vpt)->flags.is_raw) {
+				if (!tmpl_da(vpt)->flags.is_unknown) {
 					fr_fatal_assert_fail("CONSISTENCY CHECK FAILED %s[%u]: TMPL_TYPE_ATTR "
 							     "attribute \"%s\" (%s) not found in dictionary (%s)",
 							     file, line, tmpl_da(vpt)->name,
@@ -4734,7 +4802,7 @@ void tmpl_verify(char const *file, int line, tmpl_t const *vpt)
 				}
 			}
 
-			if (da != tmpl_da(vpt)) {
+			if (!tmpl_da(vpt)->flags.is_unknown && !tmpl_da(vpt)->flags.is_raw && (da != tmpl_da(vpt))) {
 				fr_fatal_assert_fail("CONSISTENCY CHECK FAILED %s[%u]: TMPL_TYPE_ATTR "
 						     "dictionary pointer %p \"%s\" (%s) "
 						     "and global dictionary pointer %p \"%s\" (%s) differ",

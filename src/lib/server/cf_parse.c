@@ -32,9 +32,9 @@ RCSID("$Id$")
 #include <freeradius-devel/server/cf_parse.h>
 #include <freeradius-devel/server/cf_priv.h>
 #include <freeradius-devel/server/log.h>
-#include <freeradius-devel/util/debug.h>
 #include <freeradius-devel/server/tmpl.h>
-
+#include <freeradius-devel/server/virtual_servers.h>
+#include <freeradius-devel/util/debug.h>
 #include <freeradius-devel/util/inet.h>
 #include <freeradius-devel/util/misc.h>
 #include <freeradius-devel/util/types.h>
@@ -1406,7 +1406,6 @@ int cf_section_parse_pass2(void *base, CONF_SECTION *cs)
 		CONF_PARSER	*rule;
 		void		*data;
 		int		type;
-		CONF_DATA	*cd;
 		fr_dict_t const	*dict = NULL;
 
 		rule = cf_data_value(rule_cd);
@@ -1486,8 +1485,7 @@ int cf_section_parse_pass2(void *base, CONF_SECTION *cs)
 		 *	Search for dictionary data somewhere in the virtual
 		 *      server.
 		 */
-		cd = cf_data_find_in_parent(cs, fr_dict_t **, "dictionary");
-		if (cd) dict = *((fr_dict_t **)cf_data_value(cd));
+		dict = virtual_server_namespace_by_ci(cf_section_to_item(cs));
 
 		/*
 		 *	Parse (and throw away) the xlat string (for validation).

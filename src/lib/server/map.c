@@ -77,7 +77,7 @@ bool map_cast_from_hex(vp_map_t *map, fr_token_t rhs_quote, char const *rhs)
 
 	fr_dict_attr_t const	*da;
 	VALUE_PAIR		*vp = NULL;
-	tmpl_t		*vpt;
+	tmpl_t			*vpt;
 	fr_value_box_t		cast;
 
 	fr_assert(map != NULL);
@@ -250,7 +250,7 @@ int map_afrom_cp(TALLOC_CTX *ctx, vp_map_t **out, CONF_PAIR *cp,
 			goto marker;
 		}
 
-		if (tmpl_attr_unknown_add(map->lhs) < 0) {
+		if (tmpl_is_attr(map->lhs) && tmpl_attr_unknown_add(map->lhs) < 0) {
 			cf_log_perr(cp, "Failed creating attribute %s", map->lhs->name);
 			goto error;
 		}
@@ -271,13 +271,14 @@ int map_afrom_cp(TALLOC_CTX *ctx, vp_map_t **out, CONF_PAIR *cp,
 		marker_subject = value;
 		goto marker;
 	}
-	if (tmpl_attr_unknown_add(map->rhs) < 0) {
-		cf_log_perr(cp, "Failed creating attribute %s", map->rhs->name);
-		goto error;
-	}
 
 	if (!map->rhs) {
 		cf_log_perr(cp, "Failed parsing RHS");
+		goto error;
+	}
+
+	if (tmpl_is_attr(map->rhs) && (tmpl_attr_unknown_add(map->rhs) < 0)) {
+		cf_log_perr(cp, "Failed creating attribute %s", map->rhs->name);
 		goto error;
 	}
 

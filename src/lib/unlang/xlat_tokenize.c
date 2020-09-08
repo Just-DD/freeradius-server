@@ -995,7 +995,7 @@ ssize_t xlat_print(fr_sbuff_t *out, xlat_exp_t const *head, fr_sbuff_escape_rule
 		FR_SBUFF_IN_STRCPY_LITERAL_RETURN(out, "%{");
 		switch (node->type) {
 		case XLAT_ATTRIBUTE:
-			slen = tmpl_print_attr_str(out, node->attr, TMPL_ATTR_REF_PREFIX_NO);
+			slen = tmpl_attr_print(out, node->attr, TMPL_ATTR_REF_PREFIX_NO);
 			if (slen < 0) {
 			error:
 				return slen;

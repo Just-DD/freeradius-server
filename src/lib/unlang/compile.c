@@ -155,6 +155,8 @@ static bool pass2_fixup_tmpl(TALLOC_CTX *ctx, CONF_ITEM const *ci, tmpl_t **vpt_
 {
 	tmpl_t *vpt = *vpt_p;
 
+	TMPL_VERIFY(vpt);
+
 	/*
 	 *	Convert virtual &Attr-Foo to "%{Attr-Foo}"
 	 */
@@ -1291,9 +1293,11 @@ static unlang_t *compile_map(unlang_t *parent, unlang_compile_t *unlang_ctx, CON
 		switch (vpt->type) {
 		case TMPL_TYPE_UNRESOLVED:
 		case TMPL_TYPE_ATTR:
-		case TMPL_TYPE_XLAT_UNRESOLVED:
 		case TMPL_TYPE_ATTR_UNRESOLVED:
+		case TMPL_TYPE_XLAT:
+		case TMPL_TYPE_XLAT_UNRESOLVED:
 		case TMPL_TYPE_EXEC:
+		case TMPL_TYPE_EXEC_UNRESOLVED:
 			break;
 
 		default:

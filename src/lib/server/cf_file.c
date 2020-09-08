@@ -32,12 +32,12 @@ RCSID("$Id$")
 
 #include <freeradius-devel/server/cf_file.h>
 #include <freeradius-devel/server/cf_priv.h>
-#include <freeradius-devel/server/log.h>
 #include <freeradius-devel/server/cond.h>
-#include <freeradius-devel/util/debug.h>
+#include <freeradius-devel/server/log.h>
 #include <freeradius-devel/server/util.h>
-
+#include <freeradius-devel/server/virtual_servers.h>
 #include <freeradius-devel/util/cursor.h>
+#include <freeradius-devel/util/debug.h>
 #include <freeradius-devel/util/misc.h>
 #include <freeradius-devel/util/syserror.h>
 
@@ -1169,12 +1169,11 @@ static int cf_file_fill(cf_stack_t *stack);
 
 static CONF_ITEM *process_if(cf_stack_t *stack)
 {
-	ssize_t slen = 0;
-	fr_cond_t *cond = NULL;
-	CONF_DATA const *cd;
-	fr_dict_t const *dict = NULL;
-	CONF_SECTION *cs;
-	char *p;
+	ssize_t		slen = 0;
+	fr_cond_t	*cond = NULL;
+	fr_dict_t const	*dict = NULL;
+	CONF_SECTION	*cs;
+	char		*p;
 	char const	*ptr = stack->ptr;
 	cf_stack_frame_t *frame = &stack->frame[stack->depth];
 	CONF_SECTION	*parent = frame->current;
@@ -1186,8 +1185,7 @@ static CONF_ITEM *process_if(cf_stack_t *stack)
 	buff[1] = stack->buff[1];
 	buff[2] = stack->buff[2];
 
-	cd = cf_data_find_in_parent(parent, fr_dict_t **, "dictionary");
-	if (cd) dict = *((fr_dict_t **)cf_data_value(cd));
+	dict = virtual_server_namespace_by_ci(cf_section_to_item(parent));
 
 	/*
 	 *	fr_cond_tokenize needs the current section, so we

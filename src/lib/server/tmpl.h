@@ -311,7 +311,7 @@ typedef enum {
 							///< dictionary, or isn't a child of
 							///< the previous ref.  May be resolved
 							///< later.
-	TMPL_ATTR_TYPE_UNRESOLVED				//!< We have a name, but nothing else
+	TMPL_ATTR_TYPE_UNRESOLVED			//!< We have a name, but nothing else
 							///< to identify the attribute.
 							///< may be resolved later.
 } tmpl_attr_type_t;
@@ -333,9 +333,15 @@ typedef struct {
 	fr_dict_attr_t const	* _CONST da;		//!< Resolved dictionary attribute.
 
 	union {
-		fr_dict_attr_t		* _CONST da;		//!< Unknown dictionary attribute.
-		char			* _CONST name;		//!< Undefined attr ref type.
-	} unknown;
+		struct {
+			fr_dict_attr_t		* _CONST da;		//!< Unknown dictionary attribute.
+		} unknown;
+
+		struct {
+			char			* _CONST name;		//!< Undefined  ref type.
+			bool			is_raw;			//!< User wants the leaf to be raw.
+		} unresolved;
+	};
 
 	int16_t			_CONST num;		//!< For array references.
 	tmpl_attr_type_t	_CONST type;
@@ -358,7 +364,8 @@ typedef struct {
 #define ar_type				type
 #define ar_da				da
 #define ar_unknown			unknown.da
-#define ar_unresolved			unknown.name
+#define ar_unresolved			unresolved.name
+#define ar_unresolved_raw		unresolved.is_raw
 #define ar_num				num
 /** @} */
 
@@ -403,16 +410,16 @@ struct tmpl_s {
 			bool			ref_prefix;	//!< true if the reference was prefixed
 								///< with a '&'.
 
-			fr_dlist_head_t		rr;	//!< Request to search or insert in.
+			fr_dlist_head_t		rr;		//!< Request to search or insert in.
 
 			bool			old_list_sep;	//!< Print ':'
 
-			pair_list_t		list;	//!< List to search or insert in.
-							///< deprecated.
+			pair_list_t		list;		//!< List to search or insert in.
+								///< deprecated.
 
-			fr_dlist_head_t		ar;	//!< Head of the attribute reference list.
+			fr_dlist_head_t		ar;		//!< Head of the attribute reference list.
 
-			bool			was_oid;
+			bool			was_oid;	//!< Was originally a numeric OID.
 		} attribute;
 
 		/*
@@ -827,7 +834,7 @@ ssize_t			tmpl_regex_compile(tmpl_t *vpt, bool subcaptures, bool runtime);
 /** @name Print the contents of a #tmpl_t
  * @{
  */
-ssize_t			tmpl_print_attr_str(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_prefix_t ar_prefix);
+ssize_t			tmpl_attr_print(fr_sbuff_t *out, tmpl_t const *vpt, tmpl_attr_ref_prefix_t ar_prefix);
 
 ssize_t			tmpl_print(fr_sbuff_t *out, tmpl_t const *vpt,
 				   tmpl_attr_ref_prefix_t ar_prefix, fr_sbuff_escape_rules_t const *e_rules);

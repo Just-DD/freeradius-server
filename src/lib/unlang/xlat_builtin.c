@@ -871,13 +871,23 @@ static ssize_t xlat_func_debug_attr(UNUSED TALLOC_CTX *ctx, UNUSED char **out, U
 
 		if (!RDEBUG_ENABLED3) continue;
 
+		RIDEBUG3("da         : %p", vp->da);
+		RIDEBUG3("is_raw     : %pV", fr_box_bool(vp->da->flags.is_raw));
+		RIDEBUG3("is_unknown : %pV", fr_box_bool(vp->da->flags.is_unknown));
+
+		if (RDEBUG_ENABLED3) {
+			RIDEBUG3("parent     : %s (%p)", vp->da->parent->name, vp->da->parent);
+		} else {
+			RIDEBUG2("parent     : %s", vp->da->parent->name);
+		}
+		RIDEBUG3("attr       : %u", vp->da->attr);
 		vendor = fr_dict_vendor_by_da(vp->da);
-		if (vendor) RIDEBUG2("Vendor : %i (%s)", vendor->pen, vendor->name);
-		RIDEBUG2("Type   : %s", fr_table_str_by_value(fr_value_box_type_table, vp->vp_type, "<INVALID>"));
+		if (vendor) RIDEBUG2("vendor     : %i (%s)", vendor->pen, vendor->name);
+		RIDEBUG3("type       : %s", fr_table_str_by_value(fr_value_box_type_table, vp->vp_type, "<INVALID>"));
 
 		switch (vp->vp_type) {
 		case FR_TYPE_VARIABLE_SIZE:
-			RIDEBUG2("Length : %zu", vp->vp_length);
+			RIDEBUG3("length     : %zu", vp->vp_length);
 			break;
 
 		default:
@@ -912,7 +922,7 @@ static ssize_t xlat_func_debug_attr(UNUSED TALLOC_CTX *ctx, UNUSED char **out, U
 			if ((pad = (11 - type->name.len)) < 0) pad = 0;
 
 			RINDENT();
-			RDEBUG2("as %s%*s: %pV", type->name.str, pad, " ", dst);
+			RDEBUG4("as %s%*s: %pV", type->name.str, pad, " ", dst);
 			REXDENT();
 
 		next_type:
@@ -1197,11 +1207,14 @@ static ssize_t xlat_func_integer(UNUSED TALLOC_CTX *ctx, char **out, size_t outl
  */
 static ssize_t parse_pad(tmpl_t **vpt_p, size_t *pad_len_p, char *pad_char_p, REQUEST *request, char const *fmt)
 {
-	ssize_t		slen;
-	unsigned long	pad_len;
-	char const	*p;
-	char		*end;
-	tmpl_t	*vpt;
+	ssize_t			slen;
+	unsigned long		pad_len;
+	char const		*p;
+	char			*end;
+	tmpl_t			*vpt;
+	fr_sbuff_parse_rules_t	p_rules = {
+					.terminals = &FR_SBUFF_TERM(" ")
+				};
 
 	*pad_char_p = ' ';		/* the default */
 
@@ -1217,7 +1230,7 @@ static ssize_t parse_pad(tmpl_t **vpt_p, size_t *pad_len_p, char *pad_char_p, RE
 
 	slen = tmpl_afrom_attr_substr(request, NULL, &vpt,
 				      &FR_SBUFF_IN(p, strlen(p)),
-				      NULL,
+				      &p_rules,
 				      &(tmpl_rules_t){ .dict_def = request->dict });
 	if (slen <= 0) {
 		RPEDEBUG("Failed parsing input string");
@@ -1347,12 +1360,12 @@ static ssize_t xlat_func_map(UNUSED TALLOC_CTX *ctx, char **out, size_t outlen,
 	vp_map_t	*map = NULL;
 	int		ret;
 
-	tmpl_rules_t parse_rules = {
+	tmpl_rules_t	attr_rules = {
 		.dict_def = request->dict,
 		.prefix = TMPL_ATTR_REF_PREFIX_AUTO
 	};
 
-	if (map_afrom_attr_str(request, &map, fmt, &parse_rules, &parse_rules) < 0) {
+	if (map_afrom_attr_str(request, &map, fmt, &attr_rules, &attr_rules) < 0) {
 		RPEDEBUG("Failed parsing \"%s\" as map", fmt);
 		return -1;
 	}

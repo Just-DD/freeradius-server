@@ -1255,21 +1255,23 @@ static ssize_t cond_tokenize_operand(TALLOC_CTX *ctx, tmpl_t **out,
 	/*
 	 *	Sanity check for nested types
 	 */
-	if (tmpl_is_attr(vpt)) switch (tmpl_da(vpt)->type) {
-	case FR_TYPE_VALUE:
-		break;
+	if (tmpl_is_attr(vpt)) {
+		switch (tmpl_da(vpt)->type) {
+		case FR_TYPE_VALUE:
+			break;
 
-	default:
-		fr_strerror_printf("Nesting types such as groups or TLVs may not "
-				   "be compared in conditions");
-		fr_sbuff_set(&our_in, &m);
-		goto error;
-	}
+		default:
+			fr_strerror_printf("Nesting types such as groups or TLVs may not "
+					   "be compared in conditions");
+			fr_sbuff_set(&our_in, &m);
+			goto error;
+		}
 
-	if (tmpl_attr_unknown_add(vpt) < 0) {
-		fr_strerror_printf("Failed defining attribute");
-		fr_sbuff_set(&our_in, &m);
-		goto error;
+		if (tmpl_attr_unknown_add(vpt) < 0) {
+			fr_strerror_printf("Failed defining attribute");
+			fr_sbuff_set(&our_in, &m);
+			goto error;
+		}
 	}
 
 	if (tmpl_cast_set(vpt, cast) < 0) {
